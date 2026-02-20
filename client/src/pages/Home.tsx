@@ -365,8 +365,8 @@ export default function Home() {
             <span className="section-label text-amber-400/80">Austin, Texas · Travis County</span>
           </div>
           <h1 className="text-4xl md:text-6xl font-bold text-white leading-tight mb-3" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-            Home Price<br />
-            <span className="text-amber-400">Estimator</span>
+            Realty360<br />
+            <span className="text-amber-400">Austin Edition</span>
           </h1>
           <p className="text-base md:text-lg text-cream/70 max-w-xl" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
             Comprehensive 3-bedroom valuation tool powered by live Austin market data, comparable sales analysis, and multi-factor pricing models.
@@ -1149,7 +1149,7 @@ export default function Home() {
               <HomeIcon size={14} className="text-amber-400" />
             </div>
             <div>
-              <div className="text-sm font-semibold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Austin TX Home Price Estimator</div>
+              <div className="text-sm font-semibold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Realty360 · Austin Edition</div>
               <div className="text-xs text-muted-foreground font-mono">Data current as of Feb 19, 2026</div>
             </div>
           </div>
