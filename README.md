@@ -4,6 +4,8 @@
 
 **Version:** 1.0.0 · **Data Vintage:** February 19, 2026 · **Market:** Austin, TX (Travis County)
 
+For local install and run instructions, see [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md).
+
 ---
 
 ## Table of Contents
