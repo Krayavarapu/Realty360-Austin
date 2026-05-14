@@ -42,6 +42,8 @@ Vite loads env files from the **repository root** (`envDir` in `vite.config.ts`)
 
 | Variable | Purpose |
 |----------|---------|
+| `VITE_MLS_GRID_TOKEN` | Bearer token for the MLS Grid demo feed (`https://api-demo.mlsgrid.com/v2`). Consumed by `client/src/lib/mls/` to populate neighborhoods and comparables. If unset, the calculator falls back to the seeded constants embedded in `client/src/pages/Home.tsx` and logs a warning. |
+| `VITE_MLS_GRID_BASE_URL` | Optional override for the MLS Grid base URL. Defaults to `https://api-demo.mlsgrid.com/v2`. Point this at `https://api.mlsgrid.com/v2` once you have a production subscription. |
 | `VITE_ANALYTICS_ENDPOINT` | Base URL for the Umami analytics script referenced in `client/index.html`. |
 | `VITE_ANALYTICS_WEBSITE_ID` | Umami site id for the same script. |
 | `VITE_FRONTEND_FORGE_API_KEY` | Used by `client/src/components/Map.tsx` if you wire in the map (Google Maps proxy). |
@@ -49,7 +51,13 @@ Vite loads env files from the **repository root** (`envDir` in `vite.config.ts`)
 | `VITE_OAUTH_PORTAL_URL` | Used by `getLoginUrl()` in `client/src/const.ts` for OAuth portal flows. |
 | `VITE_APP_ID` | App id for the same OAuth helper. |
 
+If `VITE_MLS_GRID_TOKEN` is unset, the calculator still renders using the seeded constants; you'll see a `[mls] live data fetch failed, using seeded constants` warning in the browser console. Set the token in `.env.local` and restart `pnpm dev` to enable live MLS data.
+
+**MLS Grid v2 note:** The replication API only allows a small set of fields in OData `$filter` (for example `OriginatingSystemName`, `StandardStatus`, `PropertyType`). **Bedrooms, bathrooms, and city are not filterable server-side**; the app fetches closed residential rows and applies those constraints in the browser (`client/src/lib/mls/index.ts`). Use DevTools → Network to confirm a single `GET .../Property` per session cache key when changing filters.
+
 If `VITE_ANALYTICS_*` are unset, Vite prints a warning and the analytics script URL is invalid; the **calculator and UI still run**—you will see console/network noise until you define those variables or adjust `client/index.html` for a fully offline setup.
+
+> **Security note.** `VITE_*` variables are inlined into the client bundle at build time, so anything you put in them is visible to anyone who loads the page. That is fine for the public MLS Grid demo token but unsafe for production credentials — for those, proxy MLS Grid through `server/index.ts` and keep the token in a non-`VITE_` env var on the server.
 
 Production static serving uses **`PORT`** (optional, default **3000**) when you run `pnpm start`:
 
@@ -117,6 +125,11 @@ pnpm preview
 
 4. **LAN / device testing**  
    `pnpm dev` uses `--host`, so Vite also prints a **Network** URL (for example `http://192.168.x.x:3000/`) usable from other machines on the same network, subject to your firewall.
+
+5. **MLS Grid demo (`VITE_MLS_GRID_TOKEN`)**  
+   To verify the token and endpoint outside the app:  
+   `curl -sS -H "Authorization: Bearer $VITE_MLS_GRID_TOKEN" "https://api-demo.mlsgrid.com/v2/Property?\$filter=OriginatingSystemName%20eq%20%27actris%27%20and%20StandardStatus%20eq%20%27Closed%27%20and%20PropertyType%20eq%20%27Residential%27&\$top=1"`  
+   Expect HTTP 200 and a JSON `value` array. After changing filters in the UI, you should still see only one `Property` request per cache key in the browser Network tab (filters are client-side).
 
 ---
 
