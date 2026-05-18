@@ -17,13 +17,20 @@
  *   - The default originating system is `actris` (Austin Board of Realtors).
  */
 
-import { fetchAllPages } from "./client";
+import { fetchAllPages } from "@shared/mls/client";
+import {
+  CLOSED_RESIDENTIAL_PROPERTY_SELECT,
+  DEFAULT_MAX_RECORDS,
+  DEFAULT_ORIGINATING_SYSTEM,
+  MAX_AGGREGATE_ROWS,
+  PAGE_SIZE,
+} from "@shared/mls/constants";
 import type {
   Comparable,
   Neighborhood,
   PropertyFilter,
   RESOProperty,
-} from "./types";
+} from "@shared/mls/types";
 
 export type {
   Comparable,
@@ -32,49 +39,8 @@ export type {
   RESOProperty,
 } from "./types";
 
-const DEFAULT_ORIGINATING_SYSTEM = "actris";
 const DEFAULT_BEDROOMS = 3;
-/** Default rows to pull across OData pages before client-side filtering. */
-const DEFAULT_MAX_RECORDS = 2000;
 const DEFAULT_MIN_GROUP_SIZE = 5;
-const PAGE_SIZE = 1000;
-const MAX_AGGREGATE_ROWS = 5000;
-
-/**
- * `$select` keeps payloads small. Only fields used by mappers / filters.
- * Must stay in sync with `RESOProperty` usage in this file.
- */
-const PROPERTY_SELECT = [
-  "ListingId",
-  "ListingKey",
-  "UnparsedAddress",
-  "StreetNumber",
-  "StreetName",
-  "StreetSuffix",
-  "City",
-  "PostalCity",
-  "CountyOrParish",
-  "PropertyType",
-  "PropertySubType",
-  "StandardStatus",
-  "PropertyCondition",
-  "BedroomsTotal",
-  "BathroomsTotalInteger",
-  "BathroomsFull",
-  "BathroomsHalf",
-  "LivingArea",
-  "YearBuilt",
-  "ListPrice",
-  "OriginalListPrice",
-  "ClosePrice",
-  "CloseDate",
-  "DaysOnMarket",
-  "CumulativeDaysOnMarket",
-  "PoolPrivateYN",
-  "PoolFeatures",
-  "GarageSpaces",
-  "CoveredSpaces",
-].join(",");
 
 export interface RawFetchOptions {
   /** MLS Grid originating system name. Defaults to `actris` (Austin). */
@@ -271,7 +237,7 @@ async function fetchClosedResidentialRaw(
         {
           $filter: filter,
           $top: String(Math.min(PAGE_SIZE, totalCap)),
-          $select: PROPERTY_SELECT,
+          $select: CLOSED_RESIDENTIAL_PROPERTY_SELECT,
         },
         totalCap,
       );
