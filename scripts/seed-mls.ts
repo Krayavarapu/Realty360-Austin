@@ -21,11 +21,12 @@ import {
   isUsableProperty,
   toCleanProperty,
 } from "../shared/mls/transform";
-import { loadEnvLocal, REPO_ROOT } from "./load-env-local";
+import { resolveMlsDbPath, REPO_ROOT } from "../shared/mls/db-path";
+import { loadEnvLocal } from "./load-env-local";
 import { countProperties, openMlsDb, upsertProperties } from "./mls-db";
 
 const DATA_DIR = path.join(REPO_ROOT, "data");
-const DB_PATH = path.join(DATA_DIR, "mls.sqlite");
+const DB_PATH = resolveMlsDbPath();
 const RAW_PATH = path.join(DATA_DIR, "raw-properties.json");
 
 const MAX_RECORDS = Math.min(
