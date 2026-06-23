@@ -1,32 +1,50 @@
+import fs from "node:fs";
+import { createServer } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
-import { createServer } from "http";
-import path from "path";
-import { fileURLToPath } from "url";
+import { createApp } from "./app";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
-  const app = express();
+  const app = createApp();
   const server = createServer(app);
 
-  // Serve static files from dist/public in production
   const staticPath =
     process.env.NODE_ENV === "production"
       ? path.resolve(__dirname, "public")
       : path.resolve(__dirname, "..", "dist", "public");
 
-  app.use(express.static(staticPath));
+  const apiOnly =
+    process.env.API_ONLY === "1" ||
+    process.env.NODE_ENV !== "production" ||
+    !fs.existsSync(path.join(staticPath, "index.html"));
 
-  // Handle client-side routing - serve index.html for all routes
-  app.get("*", (_req, res) => {
-    res.sendFile(path.join(staticPath, "index.html"));
-  });
+  if (!apiOnly) {
+    app.use(express.static(staticPath));
+    app.get("*", (_req, res) => {
+      res.sendFile(path.join(staticPath, "index.html"));
+    });
+  }
 
-  const port = process.env.PORT || 3000;
+  const port = Number(process.env.PORT ?? 3000);
 
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+    if (apiOnly) {
+      console.log(
+        `[server] API listening on http://localhost:${port}/ (API-only; static UI not served)`,
+      );
+      console.log(
+        `[server] Example: http://localhost:${port}/api/properties/by-address?address=507%20Hammack%20Dr%20Austin`,
+      );
+      console.log(
+        `[server] Example: http://localhost:${port}/api/properties/suggest?q=507`,
+      );
+    } else {
+      console.log(`[server] Running on http://localhost:${port}/`);
+    }
   });
 }
 

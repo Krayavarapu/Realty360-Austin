@@ -5,8 +5,23 @@
  * Layout: Full-width hero → sticky calculator split → market data → comparables → methodology
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  fetchComparables,
+  fetchNeighborhoods,
+  type Comparable,
+  type Neighborhood,
+} from "@/lib/mls";
 import {
   AreaChart,
   Area,
@@ -53,8 +68,10 @@ const NEIGHBORHOOD_IMG =
 const HOUSE_IMG =
   "https://private-us-east-1.manuscdn.com/sessionFile/1DlYSznHYSnoXaKX1xBh6g/sandbox/h71TOFzlgb1kod8VBhW40s-img-3_1771540450000_na1fn_YXVzdGluLWhvdXNlLTNiZWQ.jpg?x-oss-process=image/resize,w_1920,h_1920/format,webp/quality,q_80&Expires=1798761600&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvMURsWVN6bkhZU25vWGFLWDF4Qmg2Zy9zYW5kYm94L2g3MVRPRnpsZ2Ixa29kOFZCaFc0MHMtaW1nLTNfMTc3MTU0MDQ1MDAwMF9uYTFmbl9ZWFZ6ZEdsdUxXaHZkWE5sTFROaVpXUS5qcGc~eC1vc3MtcHJvY2Vzcz1pbWFnZS9yZXNpemUsd18xOTIwLGhfMTkyMC9mb3JtYXQsd2VicC9xdWFsaXR5LHFfODAiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3OTg3NjE2MDB9fX1dfQ__&Key-Pair-Id=K2HSFNDJXOU9YS&Signature=YdE5KyukUWgSDMXWYgEHYhMfrbebHZcU1DTFumpXSUO2g9qJkQpTpiPDqpbTQC6jzpI2VsiXMnpBbwgDgLYb7D3jUroN14nWDRGl1jWjDF25EASVfdZXFcW~bgj3iaX5lW2NZqUZT6GltFTcoaTJW4b4j74b-6MshE2SLhOvwrn7UdwaNawFpM730hI6S0ByG4ytKMKhKpwD2rd2IQHBxh1UmAe9eH9doQUyh3V47JSfa49FkPBpBsOI5ZZ31myfSD5xj~N9qzQArfkLzxl2IFMawZ17OEiqpGM-w4lhYXIPw9JxqysWthxH~2NFy5dmOGxjA9dxdLPOi-OKDHkAiA__";
 
-// Neighborhood base prices for 3-bed (from Cain Realty Feb 2026)
-const NEIGHBORHOODS = [
+// Seeded neighborhood baselines (Cain Realty, Feb 2026). Used as the initial
+// state for the calculator and as a fallback when the MLS Grid live fetch
+// fails. The component swaps in live data once `fetchNeighborhoods()` resolves.
+const INITIAL_NEIGHBORHOODS: Neighborhood[] = [
   { id: "southeast", label: "Southeast Austin", basePrice: 375760, pricePerSqft: 240, trend: -2.1, dom: 110 },
   { id: "north", label: "North Austin", basePrice: 506308, pricePerSqft: 290, trend: -1.8, dom: 95 },
   { id: "east", label: "East Austin", basePrice: 558229, pricePerSqft: 340, trend: -0.5, dom: 88 },
@@ -92,15 +109,9 @@ const PRICE_HISTORY = [
   { year: "2026 Est.", price: 497000 },
 ];
 
-// Neighborhood comparison data
-const NEIGHBORHOOD_CHART_DATA = NEIGHBORHOODS.map((n) => ({
-  name: n.label.replace(" Austin", "").replace("Overall", "City Avg"),
-  price: Math.round(n.basePrice / 1000),
-  psf: n.pricePerSqft,
-}));
-
-// Comparable sales data
-const COMPARABLES = [
+// Seeded comparable sales (Redfin recent sales, Feb 2026). Same role as
+// INITIAL_NEIGHBORHOODS — used until `fetchComparables()` resolves.
+const INITIAL_COMPARABLES: Comparable[] = [
   {
     address: "2847 Barton Creek Blvd",
     neighborhood: "South Austin",
@@ -156,6 +167,14 @@ const COMPARABLES = [
     condition: "Fair",
   },
 ];
+
+function findHood(neighborhoods: Neighborhood[], id: string): Neighborhood {
+  return (
+    neighborhoods.find((n) => n.id === id) ??
+    neighborhoods.find((n) => n.id === "overall") ??
+    neighborhoods[0]
+  );
+}
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
@@ -217,8 +236,8 @@ interface CalcInputs {
   nearDowntown: boolean;
 }
 
-function calculateEstimate(inputs: CalcInputs) {
-  const hood = NEIGHBORHOODS.find((n) => n.id === inputs.neighborhood) || NEIGHBORHOODS[4];
+function calculateEstimate(inputs: CalcInputs, neighborhoods: Neighborhood[]) {
+  const hood = findHood(neighborhoods, inputs.neighborhood);
 
   // Base: price per sqft × sqft
   let base = hood.pricePerSqft * inputs.sqft;
@@ -322,7 +341,60 @@ export default function Home() {
     nearDowntown: false,
   });
 
-  const result = calculateEstimate(inputs);
+  // Market data — seed with the embedded constants so the page renders
+  // immediately, then replace with live MLS Grid data once the fetch resolves.
+  // On fetch failure we keep the seeded values so the calculator stays usable.
+  const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>(INITIAL_NEIGHBORHOODS);
+  const [comparables, setComparables] = useState<Comparable[]>(INITIAL_COMPARABLES);
+
+  // MLS Grid client-side filters (beds / baths / city are not allowed in OData `$filter`).
+  const [mlsBedrooms, setMlsBedrooms] = useState(3);
+  const [mlsMinBaths, setMlsMinBaths] = useState<string>("any");
+  const [mlsCitiesInput, setMlsCitiesInput] = useState("");
+
+  const mlsFetchOpts = useMemo(() => {
+    const min =
+      mlsMinBaths === "any" ? undefined : Number(mlsMinBaths);
+    const cities = mlsCitiesInput
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return {
+      bedrooms: mlsBedrooms,
+      minBathrooms:
+        min !== undefined && !Number.isNaN(min) && min > 0 ? min : undefined,
+      cities: cities.length > 0 ? cities : undefined,
+    };
+  }, [mlsBedrooms, mlsMinBaths, mlsCitiesInput]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [n, c] = await Promise.all([
+          fetchNeighborhoods(mlsFetchOpts),
+          fetchComparables({ ...mlsFetchOpts, limit: 6 }),
+        ]);
+        if (cancelled) return;
+        if (n.length > 0) {
+          setNeighborhoods(n);
+          setInputs((prev) =>
+            n.some((x) => x.id === prev.neighborhood)
+              ? prev
+              : { ...prev, neighborhood: "overall" },
+          );
+        }
+        setComparables(c);
+      } catch (err) {
+        console.warn("[mls] live data fetch failed, using seeded constants", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mlsFetchOpts]);
+
+  const result = calculateEstimate(inputs, neighborhoods);
   const animatedMid = useAnimatedValue(result.mid);
   const animatedLow = useAnimatedValue(result.low);
   const animatedHigh = useAnimatedValue(result.high);
@@ -341,10 +413,68 @@ export default function Home() {
   const _HomeIcon = HomeIcon;
 
   // Determine price factors for display
-  const hood = NEIGHBORHOODS.find((n) => n.id === inputs.neighborhood)!;
+  const hood = findHood(neighborhoods, inputs.neighborhood);
   const age = 2026 - inputs.yearBuilt;
   const ageImpact = age <= 10 ? "positive" : age <= 25 ? "neutral" : "negative";
   const conditionImpact = ["excellent", "luxury"].includes(inputs.condition) ? "positive" : inputs.condition === "poor" ? "negative" : "neutral";
+
+  const neighborhoodChartData = useMemo(
+    () =>
+      neighborhoods.map((n) => ({
+        name: n.label.replace(" Austin", "").replace("Overall", "City Avg"),
+        price: Math.round(n.basePrice / 1000),
+        psf: n.pricePerSqft,
+      })),
+    [neighborhoods],
+  );
+
+  const mlsFilterBar = (
+    <div className="blueprint-card p-4 flex flex-col gap-4 md:flex-row md:flex-wrap md:items-end">
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">MLS closed · Bedrooms</Label>
+        <Select
+          value={String(mlsBedrooms)}
+          onValueChange={(v) => setMlsBedrooms(Number(v))}
+        >
+          <SelectTrigger className="w-[120px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="2">2</SelectItem>
+            <SelectItem value="3">3</SelectItem>
+            <SelectItem value="4">4</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Min baths</Label>
+        <Select value={mlsMinBaths} onValueChange={setMlsMinBaths}>
+          <SelectTrigger className="w-[130px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any</SelectItem>
+            <SelectItem value="1">1+</SelectItem>
+            <SelectItem value="2">2+</SelectItem>
+            <SelectItem value="2.5">2.5+</SelectItem>
+            <SelectItem value="3">3+</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5 flex-1 min-w-[220px] max-w-md">
+        <Label className="text-xs text-muted-foreground">City (comma-separated; empty = all)</Label>
+        <Input
+          value={mlsCitiesInput}
+          onChange={(e) => setMlsCitiesInput(e.target.value)}
+          placeholder="e.g. Austin, Round Rock"
+          className="font-mono text-sm"
+        />
+      </div>
+      <p className="text-[11px] text-muted-foreground md:w-full">
+        Beds, baths, and city cannot be used in MLS Grid OData <code className="text-amber-400/80">$filter</code>; filters run in the browser on the cached feed. Market Data and Comparables share the same cohort.
+      </p>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -447,7 +577,7 @@ export default function Home() {
                   <span className="text-sm font-semibold" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Location / Neighborhood</span>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {NEIGHBORHOODS.map((n) => (
+                  {neighborhoods.map((n) => (
                     <button
                       key={n.id}
                       onClick={() => update("neighborhood", n.id)}
@@ -771,6 +901,8 @@ export default function Home() {
               <p className="text-sm text-muted-foreground">Live data sourced from Redfin, Zillow, and Cain Realty Group. Updated February 19, 2026.</p>
             </div>
 
+            {mlsFilterBar}
+
             {/* Price History Chart */}
             <div className="blueprint-card p-6">
               <div className="flex items-center justify-between mb-6">
@@ -815,7 +947,7 @@ export default function Home() {
                 <div className="section-label mb-1">By Area</div>
                 <h3 className="text-lg font-semibold mb-5" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>3-Bedroom Prices by Neighborhood</h3>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={NEIGHBORHOOD_CHART_DATA} layout="vertical" margin={{ left: 10, right: 20 }}>
+                  <BarChart data={neighborhoodChartData} layout="vertical" margin={{ left: 10, right: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.27 0.07 250)" strokeOpacity={0.4} horizontal={false} />
                     <XAxis type="number" tickFormatter={(v) => `$${v}K`} tick={{ fill: "oklch(0.65 0.04 250)", fontSize: 10, fontFamily: "IBM Plex Mono" }} axisLine={false} tickLine={false} />
                     <YAxis type="category" dataKey="name" tick={{ fill: "oklch(0.65 0.04 250)", fontSize: 10, fontFamily: "IBM Plex Sans" }} axisLine={false} tickLine={false} width={80} />
@@ -832,7 +964,7 @@ export default function Home() {
                 <div className="section-label mb-1">Price Density</div>
                 <h3 className="text-lg font-semibold mb-5" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>Price per Square Foot by Area</h3>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={NEIGHBORHOOD_CHART_DATA} layout="vertical" margin={{ left: 10, right: 20 }}>
+                  <BarChart data={neighborhoodChartData} layout="vertical" margin={{ left: 10, right: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.27 0.07 250)" strokeOpacity={0.4} horizontal={false} />
                     <XAxis type="number" tickFormatter={(v) => `$${v}`} tick={{ fill: "oklch(0.65 0.04 250)", fontSize: 10, fontFamily: "IBM Plex Mono" }} axisLine={false} tickLine={false} />
                     <YAxis type="category" dataKey="name" tick={{ fill: "oklch(0.65 0.04 250)", fontSize: 10, fontFamily: "IBM Plex Sans" }} axisLine={false} tickLine={false} width={80} />
@@ -860,7 +992,7 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody>
-                    {NEIGHBORHOODS.map((n) => (
+                    {neighborhoods.map((n) => (
                       <tr key={n.id} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
                         <td className="py-3 px-3 font-medium">{n.label}</td>
                         <td className="py-3 px-3 font-mono text-amber-300">{formatPrice(n.basePrice)}</td>
@@ -902,18 +1034,29 @@ export default function Home() {
             <div>
               <SectionLabel>Recent Sales Analysis</SectionLabel>
               <h2 className="text-2xl font-bold mt-2 mb-1" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-                Comparable Sales (Jan–Feb 2026)
+                Comparable Sales
               </h2>
-              <p className="text-sm text-muted-foreground">Six recent 3-bedroom sales across Austin neighborhoods, illustrating the price range and key value drivers.</p>
+              <p className="text-sm text-muted-foreground">
+                Recent closed MLS listings (demo feed) filtered by bedrooms, minimum baths, and optional city list. Up to six sales shown, newest close date first.
+              </p>
             </div>
 
+            {mlsFilterBar}
+
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-              {COMPARABLES.map((c, i) => {
-                const ratio = ((c.soldPrice / c.listPrice) * 100).toFixed(1);
+              {comparables.length === 0 ? (
+                <div className="blueprint-card p-8 text-center text-sm text-muted-foreground">
+                  No listings match the current MLS filters. Try clearing the city field, lowering minimum baths, or choosing another bedroom count.
+                </div>
+              ) : (
+              comparables.map((c, i) => {
+                const ratio = c.listPrice
+                  ? ((c.soldPrice / c.listPrice) * 100).toFixed(1)
+                  : "—";
                 const psf = Math.round(c.soldPrice / c.sqft);
                 const diff = c.soldPrice - c.listPrice;
                 return (
-                  <div key={i} className="blueprint-card p-5 flex flex-col gap-3">
+                  <div key={`${c.address}-${i}`} className="blueprint-card p-5 flex flex-col gap-3">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="font-semibold text-sm leading-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{c.address}</div>
@@ -952,7 +1095,7 @@ export default function Home() {
                       <div className="flex justify-between text-xs text-muted-foreground">
                         <span>List: {formatPrice(c.listPrice)}</span>
                         <span className={diff < 0 ? "text-teal-400" : "text-red-400"}>
-                          {diff < 0 ? "" : "+"}{formatPrice(diff)} ({ratio}%)
+                          {diff < 0 ? "" : "+"}{formatPrice(diff)} ({ratio === "—" ? ratio : `${ratio}%`})
                         </span>
                       </div>
                     </div>
@@ -971,7 +1114,8 @@ export default function Home() {
                     </div>
                   </div>
                 );
-              })}
+              })
+              )}
             </div>
 
             {/* Comparable summary stats */}
@@ -979,10 +1123,10 @@ export default function Home() {
               <div className="section-label mb-4">Comparable Summary</div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: "Avg Sold Price", value: formatPrice(Math.round(COMPARABLES.reduce((a, c) => a + c.soldPrice, 0) / COMPARABLES.length)) },
-                  { label: "Price Range", value: `${formatK(Math.min(...COMPARABLES.map(c => c.soldPrice)))}–${formatK(Math.max(...COMPARABLES.map(c => c.soldPrice)))}` },
-                  { label: "Avg Price/SqFt", value: `$${Math.round(COMPARABLES.reduce((a, c) => a + c.soldPrice / c.sqft, 0) / COMPARABLES.length)}/sqft` },
-                  { label: "Avg Days on Market", value: `${Math.round(COMPARABLES.reduce((a, c) => a + c.dom, 0) / COMPARABLES.length)} days` },
+                  { label: "Avg Sold Price", value: comparables.length ? formatPrice(Math.round(comparables.reduce((a, c) => a + c.soldPrice, 0) / comparables.length)) : "—" },
+                  { label: "Price Range", value: comparables.length ? `${formatK(Math.min(...comparables.map(c => c.soldPrice)))}–${formatK(Math.max(...comparables.map(c => c.soldPrice)))}` : "—" },
+                  { label: "Avg Price/SqFt", value: comparables.length ? `$${Math.round(comparables.reduce((a, c) => a + c.soldPrice / c.sqft, 0) / comparables.length)}/sqft` : "—" },
+                  { label: "Avg Days on Market", value: comparables.length ? `${Math.round(comparables.reduce((a, c) => a + c.dom, 0) / comparables.length)} days` : "—" },
                 ].map((s) => (
                   <div key={s.label} className="bg-secondary/40 rounded p-4">
                     <div className="section-label mb-2">{s.label}</div>
