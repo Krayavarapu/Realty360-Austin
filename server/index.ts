@@ -39,6 +39,9 @@ async function startServer() {
       console.log(
         `[server] Example: http://localhost:${port}/api/properties/by-address?address=507%20Hammack%20Dr%20Austin`,
       );
+      console.log(
+        `[server] Example: http://localhost:${port}/api/properties/suggest?q=507`,
+      );
     } else {
       console.log(`[server] Running on http://localhost:${port}/`);
     }

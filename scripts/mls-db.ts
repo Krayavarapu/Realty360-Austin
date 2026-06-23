@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import {
+  addressQueryMatchesProperty,
+  buildAddressLookupPrefixes,
+  buildCanonicalAddressNorm,
+  parseAddressQuery,
+} from "../shared/mls/address-query";
 import { resolveMlsDbPath } from "../shared/mls/db-path";
 import type { CleanProperty } from "../shared/mls/transform";
+import { normalizeAddress } from "../shared/mls/transform";
 
 /** Full row from `properties` (snake_case column names). */
 export type PropertyRow = CleanProperty & { updated_at?: string };
@@ -33,6 +40,7 @@ CREATE TABLE IF NOT EXISTS properties (
 );
 
 CREATE INDEX IF NOT EXISTS idx_properties_address_norm ON properties(address_norm);
+CREATE INDEX IF NOT EXISTS idx_properties_address_line ON properties(address_line);
 CREATE INDEX IF NOT EXISTS idx_properties_city ON properties(city);
 CREATE INDEX IF NOT EXISTS idx_properties_listing_id ON properties(listing_id);
 `;
@@ -172,4 +180,324 @@ export function searchPropertiesByAddress(
        LIMIT @limit`,
     )
     .all({ address_norm: addressNorm, limit }) as unknown as PropertyRow[];
+}
+
+const MIN_SUGGEST_QUERY_LEN = 2;
+const DEFAULT_SUGGEST_LIMIT = 8;
+
+/**
+ * Typeahead suggestions from MLS `properties` (prefix on street line and
+ * normalized full address; substring fallback on `address_norm`).
+ */
+export function suggestPropertiesByAddress(
+  db: MlsDatabase,
+  query: string,
+  limit = DEFAULT_SUGGEST_LIMIT,
+): PropertyRow[] {
+  const trimmed = query.trim();
+  const norm = normalizeAddress(trimmed);
+  if (!norm || norm.length < MIN_SUGGEST_QUERY_LEN) {
+    return [];
+  }
+
+  return db
+    .prepare(
+      `${SELECT_PROPERTY}
+       WHERE address_line LIKE @line_prefix
+          OR address_norm LIKE @norm_prefix
+          OR address_norm LIKE '%' || @norm || '%'
+       ORDER BY
+         CASE
+           WHEN address_line LIKE @line_prefix THEN 0
+           WHEN address_norm LIKE @norm_prefix THEN 1
+           ELSE 2
+         END,
+         address_line
+       LIMIT @limit`,
+    )
+    .all({
+      line_prefix: `${trimmed}%`,
+      norm_prefix: `${norm}%`,
+      norm,
+      limit,
+    }) as unknown as PropertyRow[];
+}
+
+/**
+ * Match `street city [zip] state` when the user omits zip or uses `city state`
+ * while the DB stores `city zip state` (zip between city and state).
+ */
+export function findPropertyByStreetCityState(
+  db: MlsDatabase,
+  opts: {
+    streetPart: string;
+    city: string;
+    state?: string | null;
+    postalCode?: string | null;
+  },
+): PropertyRow | undefined {
+  const streetCity = `${opts.streetPart} ${opts.city}`.trim();
+  let sql = `${SELECT_PROPERTY}
+    WHERE address_norm LIKE @street_city || ' %'`;
+  const params: Record<string, string> = { street_city: streetCity };
+
+  if (opts.state) {
+    sql += ` AND address_norm LIKE '%' || @state`;
+    params.state = ` ${opts.state}`;
+  }
+  if (opts.postalCode) {
+    sql += ` AND address_norm LIKE '%' || @postal_code || '%'`;
+    params.postal_code = opts.postalCode;
+  }
+
+  sql += ` ORDER BY address_line LIMIT 1`;
+
+  return db.prepare(sql).get(params) as PropertyRow | undefined;
+}
+
+export function searchPropertiesByStreetCityState(
+  db: MlsDatabase,
+  opts: {
+    streetPart: string;
+    city: string;
+    state?: string | null;
+    postalCode?: string | null;
+  },
+  limit = 10,
+): PropertyRow[] {
+  const streetCity = `${opts.streetPart} ${opts.city}`.trim();
+  let sql = `${SELECT_PROPERTY}
+    WHERE address_norm LIKE @street_city || ' %'`;
+  const params: Record<string, string | number> = {
+    street_city: streetCity,
+    limit,
+  };
+
+  if (opts.state) {
+    sql += ` AND address_norm LIKE '%' || @state`;
+    params.state = ` ${opts.state}`;
+  }
+  if (opts.postalCode) {
+    sql += ` AND address_norm LIKE '%' || @postal_code || '%'`;
+    params.postal_code = opts.postalCode;
+  }
+
+  sql += ` ORDER BY address_line LIMIT @limit`;
+
+  return db.prepare(sql).all(params) as unknown as PropertyRow[];
+}
+
+export type AddressResolveMatch = "exact" | "prefix" | "partial" | "structured";
+
+export type AddressResolveResult =
+  | { status: "found"; match: AddressResolveMatch; property: PropertyRow }
+  | { status: "multiple"; addressNorm: string; properties: PropertyRow[] }
+  | { status: "not_found"; addressNorm: string };
+
+function uniqueByListingKey(rows: PropertyRow[]): PropertyRow[] {
+  const seen = new Set<string>();
+  const out: PropertyRow[] = [];
+  for (const row of rows) {
+    if (seen.has(row.listing_key)) continue;
+    seen.add(row.listing_key);
+    out.push(row);
+  }
+  return out;
+}
+
+function isAcceptableMatch(
+  rawNorm: string,
+  property: PropertyRow,
+  match: AddressResolveMatch,
+): boolean {
+  if (match === "exact") return true;
+  return addressQueryMatchesProperty(rawNorm, property.address_norm);
+}
+
+/**
+ * exact norm, prefix, canonical reorder (street city zip state), structured
+ * street+city+state (handles zip omitted), then substring search.
+ */
+export function resolvePropertyByAddress(
+  db: MlsDatabase,
+  rawAddress: string,
+): AddressResolveResult {
+  const parsed = parseAddressQuery(rawAddress);
+  const addressNorm = parsed.rawNorm;
+
+  if (!addressNorm) {
+    return { status: "not_found", addressNorm: "" };
+  }
+
+  const exact = findPropertyByAddressNorm(db, addressNorm);
+  if (exact) {
+    return { status: "found", match: "exact", property: exact };
+  }
+
+  const canonical = buildCanonicalAddressNorm(parsed);
+  if (canonical && canonical !== addressNorm) {
+    const canonicalHit = findPropertyByAddressNorm(db, canonical);
+    if (canonicalHit) {
+      return { status: "found", match: "exact", property: canonicalHit };
+    }
+  }
+
+  for (const prefix of buildAddressLookupPrefixes(parsed)) {
+    const hit = findPropertyByAddressPrefix(db, prefix);
+    if (hit && isAcceptableMatch(addressNorm, hit, "prefix")) {
+      return { status: "found", match: "prefix", property: hit };
+    }
+  }
+
+  if (parsed.city) {
+    const structured = findPropertyByStreetCityState(db, {
+      streetPart: parsed.streetPart,
+      city: parsed.city,
+      state: parsed.state,
+      postalCode: parsed.postalCode,
+    });
+    if (
+      structured &&
+      isAcceptableMatch(addressNorm, structured, "structured")
+    ) {
+      return { status: "found", match: "structured", property: structured };
+    }
+
+    const structuredCandidates = searchPropertiesByStreetCityState(
+      db,
+      {
+        streetPart: parsed.streetPart,
+        city: parsed.city,
+        state: parsed.state,
+        postalCode: parsed.postalCode,
+      },
+      10,
+    ).filter((row) => isAcceptableMatch(addressNorm, row, "structured"));
+    if (structuredCandidates.length === 1) {
+      return {
+        status: "found",
+        match: "structured",
+        property: structuredCandidates[0]!,
+      };
+    }
+    if (structuredCandidates.length > 1) {
+      return {
+        status: "multiple",
+        addressNorm,
+        properties: structuredCandidates,
+      };
+    }
+  }
+
+  const partialCandidates = uniqueByListingKey([
+    ...searchPropertiesByAddress(db, parsed.streetPart, 10),
+    ...(parsed.city
+      ? searchPropertiesByAddress(db, `${parsed.streetPart} ${parsed.city}`, 10)
+      : []),
+    ...searchPropertiesByAddress(db, addressNorm, 10),
+  ]).filter((row) => isAcceptableMatch(addressNorm, row, "partial"));
+
+  if (partialCandidates.length === 0) {
+    return { status: "not_found", addressNorm };
+  }
+
+  if (partialCandidates.length === 1) {
+    return {
+      status: "found",
+      match: "partial",
+      property: partialCandidates[0]!,
+    };
+  }
+
+  return {
+    status: "multiple",
+    addressNorm,
+    properties: partialCandidates.slice(0, 10),
+  };
+}
+
+const EARTH_RADIUS_MILES = 3958.8;
+
+/** Great-circle distance between two WGS-84 coordinates, in miles. */
+export function haversineMiles(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return EARTH_RADIUS_MILES * 2 * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+export type PropertyWithDistance = PropertyRow & { distance_miles: number };
+
+/**
+ * Properties within `radiusMiles` of a point with at least `minBedrooms` /
+ * `minBathrooms`. Uses a bounding-box SQL pre-filter, then Haversine distance in JS.
+ */
+export function findPropertiesWithinRadius(
+  db: MlsDatabase,
+  opts: {
+    latitude: number;
+    longitude: number;
+    radiusMiles: number;
+    minBedrooms: number;
+    minBathrooms: number;
+    excludeListingKey?: string;
+    limit?: number;
+  },
+): PropertyWithDistance[] {
+  const {
+    latitude,
+    longitude,
+    radiusMiles,
+    minBedrooms,
+    minBathrooms,
+    excludeListingKey,
+    limit = 50,
+  } = opts;
+
+  const latDelta = radiusMiles / 69;
+  const lonDelta =
+    radiusMiles / (69 * Math.cos((latitude * Math.PI) / 180));
+
+  const rows = db
+    .prepare(
+      `${SELECT_PROPERTY}
+       WHERE latitude IS NOT NULL
+         AND longitude IS NOT NULL
+         AND bedrooms >= @min_bedrooms
+         AND bathrooms >= @min_bathrooms
+         AND latitude BETWEEN @min_lat AND @max_lat
+         AND longitude BETWEEN @min_lon AND @max_lon
+         AND (@exclude_listing_key IS NULL OR listing_key != @exclude_listing_key)`,
+    )
+    .all({
+      min_bedrooms: minBedrooms,
+      min_bathrooms: minBathrooms,
+      min_lat: latitude - latDelta,
+      max_lat: latitude + latDelta,
+      min_lon: longitude - lonDelta,
+      max_lon: longitude + lonDelta,
+      exclude_listing_key: excludeListingKey ?? null,
+    }) as unknown as PropertyRow[];
+
+  return rows
+    .map((row) => ({
+      ...row,
+      distance_miles: haversineMiles(
+        latitude,
+        longitude,
+        row.latitude!,
+        row.longitude!,
+      ),
+    }))
+    .filter((row) => row.distance_miles <= radiusMiles)
+    .sort((a, b) => a.distance_miles - b.distance_miles)
+    .slice(0, limit);
 }
