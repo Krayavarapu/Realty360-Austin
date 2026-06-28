@@ -1,5 +1,6 @@
 import express from "express";
 import { propertiesRouter } from "./routes/properties";
+import { tcadRouter } from "./routes/tcad";
 
 export function createApp() {
   const app = express();
@@ -8,5 +9,6 @@ export function createApp() {
     res.json({ ok: true });
   });
   app.use("/api/properties", propertiesRouter);
+  app.use("/api/tcad", tcadRouter);
   return app;
 }
