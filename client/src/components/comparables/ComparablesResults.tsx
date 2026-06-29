@@ -70,6 +70,12 @@ export function ComparablesResults({ result }: ComparablesResultsProps) {
           {result.subject.bedrooms ?? "—"} bed / {result.subject.bathrooms ?? "—"} bath
           {" · "}
           {result.radiusMiles} mi radius
+          {result.filters.maxAgeMonths != null && (
+            <>
+              {" · "}
+              closed last {result.filters.maxAgeMonths} mo
+            </>
+          )}
           {" · "}
           {result.count} comparable{result.count === 1 ? "" : "s"}
         </div>

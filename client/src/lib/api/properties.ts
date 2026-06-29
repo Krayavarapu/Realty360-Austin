@@ -28,7 +28,7 @@ export class PropertiesApiError extends Error {
 export async function fetchComparablesByRadius(
   address: string,
   radiusMiles: number,
-  opts?: { limit?: number },
+  opts?: { limit?: number; maxAgeMonths?: number },
 ): Promise<ComparablesByRadiusResponse> {
   const params = new URLSearchParams({
     address: address.trim(),
@@ -36,6 +36,9 @@ export async function fetchComparablesByRadius(
   });
   if (opts?.limit != null) {
     params.set("limit", String(opts.limit));
+  }
+  if (opts?.maxAgeMonths != null) {
+    params.set("maxAgeMonths", String(opts.maxAgeMonths));
   }
 
   const res = await fetch(`/api/properties/by-radius?${params}`);

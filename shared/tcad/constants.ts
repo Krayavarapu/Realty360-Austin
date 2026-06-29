@@ -9,6 +9,9 @@
 export const TCAD_ARCGIS_QUERY_URL =
   "https://gis.traviscountytx.gov/server1/rest/services/Boundaries_and_Jurisdictions/TCAD/MapServer/0/query";
 
+/** WGS-84 output for parcel geometry queries. */
+export const TCAD_ARCGIS_WGS84_SR = 4326;
+
 /** Attributes requested from the TCAD layer for property-tax lookups. */
 export const TCAD_PROPERTY_OUT_FIELDS = [
   "PROP_ID",

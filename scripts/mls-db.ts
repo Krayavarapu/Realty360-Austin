@@ -520,6 +520,8 @@ export function findPropertiesWithinRadius(
     minBedrooms: number;
     minBathrooms: number;
     excludeListingKey?: string;
+    /** Only include sales with `close_date` on or after this cutoff (YYYY-MM-DD). */
+    minCloseDate?: string;
     limit?: number;
   },
 ): PropertyWithDistance[] {
@@ -530,6 +532,7 @@ export function findPropertiesWithinRadius(
     minBedrooms,
     minBathrooms,
     excludeListingKey,
+    minCloseDate,
     limit = 50,
   } = opts;
 
@@ -547,7 +550,8 @@ export function findPropertiesWithinRadius(
          AND bathrooms >= @min_bathrooms
          AND latitude BETWEEN @min_lat AND @max_lat
          AND longitude BETWEEN @min_lon AND @max_lon
-         AND (@exclude_listing_key IS NULL OR listing_key != @exclude_listing_key)`,
+         AND (@exclude_listing_key IS NULL OR listing_key != @exclude_listing_key)
+         AND (@min_close_date IS NULL OR (close_date IS NOT NULL AND close_date >= @min_close_date))`,
       )
       .all({
         min_bedrooms: minBedrooms,
@@ -557,6 +561,7 @@ export function findPropertiesWithinRadius(
         min_lon: longitude - lonDelta,
         max_lon: longitude + lonDelta,
         exclude_listing_key: excludeListingKey ?? null,
+        min_close_date: minCloseDate ?? null,
       }) as unknown as PropertyRow[],
   );
 

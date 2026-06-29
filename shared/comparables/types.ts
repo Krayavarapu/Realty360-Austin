@@ -45,6 +45,9 @@ export interface ComparablesByRadiusResponse {
   filters: {
     minBedrooms: number;
     minBathrooms: number;
+    /** Present when the request included `maxAgeMonths`. */
+    maxAgeMonths?: number;
+    minCloseDate?: string;
   };
   subject: PropertyDetailDto;
   count: number;

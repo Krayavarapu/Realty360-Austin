@@ -1,3 +1,4 @@
+import type { TcadParcelCentroid } from "./geometry";
 import type { TcadArcGisAttributes, TcadPropertyDto } from "./types";
 
 function formatDeedDate(raw: number | string | null): string | null {
@@ -11,6 +12,7 @@ function formatDeedDate(raw: number | string | null): string | null {
 export function toTcadPropertyDto(
   attrs: TcadArcGisAttributes,
   fetchedAt: string,
+  centroid: TcadParcelCentroid | null = null,
 ): TcadPropertyDto {
   return {
     propId: attrs.PROP_ID,
@@ -18,6 +20,8 @@ export function toTcadPropertyDto(
     situsAddress: attrs.situs_address ?? null,
     city: attrs.situs_city ?? null,
     zip: attrs.situs_zip ?? null,
+    latitude: centroid?.latitude ?? null,
+    longitude: centroid?.longitude ?? null,
     appraisedValue: attrs.appraised_val ?? null,
     marketValue: attrs.market_value ?? null,
     assessedValue: attrs.assessed_val ?? null,

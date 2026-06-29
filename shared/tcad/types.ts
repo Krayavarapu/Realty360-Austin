@@ -17,6 +17,9 @@ export interface TcadArcGisAttributes {
 
 export interface TcadArcGisFeature {
   attributes: TcadArcGisAttributes;
+  geometry?: {
+    rings?: number[][][];
+  };
 }
 
 export interface TcadArcGisQueryResponse {
@@ -31,6 +34,9 @@ export interface TcadPropertyDto {
   situsAddress: string | null;
   city: string | null;
   zip: string | null;
+  /** Parcel centroid (WGS-84). Useful when MLS coordinates are unavailable. */
+  latitude: number | null;
+  longitude: number | null;
   appraisedValue: number | null;
   marketValue: number | null;
   assessedValue: number | null;

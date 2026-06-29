@@ -7,6 +7,13 @@ import { MapPin, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AddressSuggestInput } from "@/components/comparables/AddressSuggestInput";
 import { ComparablesResults } from "@/components/comparables/ComparablesResults";
 import {
@@ -20,9 +27,17 @@ import {
 const HERO_IMG =
   "https://private-us-east-1.manuscdn.com/sessionFile/1DlYSznHYSnoXaKX1xBh6g/sandbox/h71TOFzlgb1kod8VBhW40s-img-1_1771540452000_na1fn_YXVzdGluLWhlcm8tYmx1ZXByaW50.jpg?x-oss-process=image/resize,w_1920,h_1920/format,webp/quality,q_80&Expires=1798761600&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvMURsWVN6bkhZU25vWGFLWDF4Qmg2Zy9zYW5kYm94L2g3MVRPRnpsZ2Ixa29kOFZCaFc0MHMtaW1nLTFfMTc3MTU0MDQ1MjAwMF9uYTFmbl9ZWFZ6ZEdsdUxXaGxjbTh0WW14MVpYQnlhVzUwLmpwZz94LW9zcy1wcm9jZXNzPWltYWdlL3Jlc2l6ZSx3XzE5MjAsaF8xOTIwL2Zvcm1hdCx3ZWJwL3F1YWxpdHkscV84MCIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc5ODc2MTYwMH19fV19&Key-Pair-Id=K2HSFNDJXOU9YS&Signature=fqvBa8FEcSgYSqYUIULQj3KwgEpXsOQOKsAI4bQ3DQhthV7TkIeTbuMINU8FhQjWALkcadbb4mVfkeC0pWffpkOVlurOBv263b4DN9GfxmDRmHq8S4ca6MIaQg5nAd0asSl06cYZFL15hEZYgx2Qwy1wT7Jz0hTbKDcx36Zs8W-bXPcLJCyQe7vLvDuQLByVh8iTuTIAN2M8vymS6MvgdOGCPf4m6QHjVnT84GBmPq3el9p9sCdCJLbkGBcWWO5XwwWDN8AjUw51rt6OS0ZJ7qAb3pLdRKkizpWQMSqt6xPKwgsv6Eutgjxc6bRiVf4ynpUzXAsCCsYFw-NaBbJssA__";
 
+const RECENCY_OPTIONS = [
+  { value: "6", label: "Last 6 months" },
+  { value: "12", label: "Last 12 months" },
+  { value: "24", label: "Last 24 months" },
+  { value: "all", label: "All closed sales" },
+] as const;
+
 export default function ComparablesLanding() {
   const [address, setAddress] = useState("");
   const [radiusMiles, setRadiusMiles] = useState("2");
+  const [maxAgeMonths, setMaxAgeMonths] = useState("12");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ComparablesByRadiusResponse | null>(null);
@@ -61,7 +76,10 @@ export default function ComparablesLanding() {
         }
       }
 
-      const data = await fetchComparablesByRadius(trimmed, radius);
+      const data = await fetchComparablesByRadius(trimmed, radius, {
+        maxAgeMonths:
+          maxAgeMonths === "all" ? undefined : Number(maxAgeMonths),
+      });
       setResult(data);
     } catch (err) {
       setResult(null);
@@ -129,6 +147,26 @@ export default function ComparablesLanding() {
               className="font-mono text-sm max-w-[160px]"
               disabled={loading}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="recency">Sale recency</Label>
+            <Select
+              value={maxAgeMonths}
+              onValueChange={setMaxAgeMonths}
+              disabled={loading}
+            >
+              <SelectTrigger id="recency" className="max-w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RECENCY_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <Button
