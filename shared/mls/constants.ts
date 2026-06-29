@@ -42,4 +42,6 @@ export const CLOSED_RESIDENTIAL_PROPERTY_SELECT = [
   "PoolFeatures",
   "GarageSpaces",
   "CoveredSpaces",
+  "LotSizeAcres",
+  "LotSizeSquareFeet",
 ].join(",");

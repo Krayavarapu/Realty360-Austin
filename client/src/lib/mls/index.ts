@@ -25,6 +25,15 @@ import {
   MAX_AGGREGATE_ROWS,
   PAGE_SIZE,
 } from "@shared/mls/constants";
+import {
+  derivePropertyCondition,
+  formatPropertyConditionLabel,
+} from "@shared/mls/condition";
+import {
+  deriveGarageSpaces,
+  deriveHasPool,
+  totalBaths,
+} from "@shared/mls/transform";
 import type {
   Comparable,
   Neighborhood,
@@ -133,13 +142,6 @@ export async function fetchComparables(
 // Client-side filtering (MLS Grid v2 — not allowed in `$filter`)
 // -----------------------------------------------------------------------------
 
-function totalBaths(p: RESOProperty): number {
-  return (
-    p.BathroomsTotalInteger ??
-    (p.BathroomsFull ?? 0) + 0.5 * (p.BathroomsHalf ?? 0)
-  );
-}
-
 /**
  * Pure client-side filter for beds, baths, and city. Call on the cached raw
  * closed-residential slice — does not hit the network.
@@ -169,7 +171,7 @@ export function applyPropertyFilter(
     if (
       filter.minBathrooms !== undefined &&
       filter.minBathrooms > 0 &&
-      totalBaths(p) + 1e-9 < filter.minBathrooms
+      (totalBaths(p) ?? 0) + 1e-9 < filter.minBathrooms
     ) {
       return false;
     }
@@ -255,11 +257,9 @@ async function fetchClosedResidentialRaw(
 }
 
 function mapToComparable(p: RESOProperty): Comparable {
-  const baths = totalBaths(p);
-
-  const hasPool =
-    Boolean(p.PoolPrivateYN) ||
-    (p.PoolFeatures?.some((f) => !/none/i.test(f)) ?? false);
+  const baths = totalBaths(p) ?? 0;
+  const pool = deriveHasPool(p);
+  const garageSpaces = deriveGarageSpaces(p);
 
   return {
     address: buildAddress(p),
@@ -272,9 +272,9 @@ function mapToComparable(p: RESOProperty): Comparable {
     soldDate: formatCloseDate(p.CloseDate),
     dom: p.DaysOnMarket ?? p.CumulativeDaysOnMarket ?? 0,
     yearBuilt: p.YearBuilt ?? 0,
-    hasPool,
-    hasGarage: (p.GarageSpaces ?? p.CoveredSpaces ?? 0) > 0,
-    condition: deriveCondition(p),
+    hasPool: pool ?? false,
+    hasGarage: (garageSpaces ?? 0) > 0,
+    condition: formatPropertyConditionLabel(derivePropertyCondition(p)),
   };
 }
 
@@ -284,31 +284,6 @@ function buildAddress(p: RESOProperty): string {
     .filter(Boolean)
     .join(" ")
     .trim();
-}
-
-/**
- * Maps the RESO `PropertyCondition` array (free-text values like "Resale",
- * "Updated/Remodeled", "New Construction") onto the calculator's condition
- * tiers. Falls back to a property-age heuristic when the field is missing,
- * since `PropertyCondition` is not consistently populated in the demo feed.
- */
-function deriveCondition(p: RESOProperty): string {
-  const conds = p.PropertyCondition ?? [];
-  if (conds.some((c) => /new construction/i.test(c))) return "Excellent";
-  if (conds.some((c) => /updated|remodeled/i.test(c))) return "Excellent";
-  if (conds.some((c) => /tear[- ]?down|fixer/i.test(c))) return "Poor";
-  if (conds.some((c) => /resale/i.test(c))) {
-    // Resale is the default vendor value; refine by age below.
-  }
-
-  if (p.YearBuilt && p.YearBuilt > 1500) {
-    const age = new Date().getUTCFullYear() - p.YearBuilt;
-    if (age <= 5) return "Excellent";
-    if (age <= 25) return "Good";
-    if (age <= 40) return "Fair";
-    return "Poor";
-  }
-  return "Good";
 }
 
 function formatCloseDate(iso?: string): string {

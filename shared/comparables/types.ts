@@ -10,6 +10,7 @@ export interface PropertyDetailDto {
   bedrooms: number | null;
   bathrooms: number | null;
   livingAreaSqft: number | null;
+  listPrice: number | null;
   closePrice: number | null;
   closeDate: string | null;
   soldDate: string;
@@ -18,6 +19,11 @@ export interface PropertyDetailDto {
   standardStatus: string | null;
   propertyType: string | null;
   pricePerSqft: number | null;
+  hasPool: boolean | null;
+  hasGarage: boolean | null;
+  garageSpaces: number | null;
+  lotSizeAcres: number | null;
+  condition: string | null;
   latitude: number | null;
   longitude: number | null;
 }
