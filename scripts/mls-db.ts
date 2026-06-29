@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { haversineMiles } from "../shared/comparables/geo";
 import {
   addressQueryMatchesProperty,
   buildAddressLookupPrefixes,
   buildCanonicalAddressNorm,
   parseAddressQuery,
 } from "../shared/mls/address-query";
+import { OPEN_LISTING_STATUSES } from "../shared/mls/constants";
 import { resolveMlsDbPath } from "../shared/mls/db-path";
 import type { CleanProperty } from "../shared/mls/transform";
 import { normalizeAddress } from "../shared/mls/transform";
@@ -49,6 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_properties_address_line ON properties(address_lin
 CREATE INDEX IF NOT EXISTS idx_properties_city ON properties(city);
 CREATE INDEX IF NOT EXISTS idx_properties_listing_id ON properties(listing_id);
 CREATE INDEX IF NOT EXISTS idx_properties_close_date ON properties(close_date);
+CREATE INDEX IF NOT EXISTS idx_properties_standard_status ON properties(standard_status);
 `;
 
 /** Columns added after initial schema — applied via ALTER for existing DBs. */
@@ -73,6 +76,9 @@ function ensureSchemaMigrations(db: MlsDatabase): void {
   }
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_properties_close_date ON properties(close_date)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_properties_standard_status ON properties(standard_status)",
   );
 }
 
@@ -487,24 +493,6 @@ export function resolvePropertyByAddress(
   };
 }
 
-const EARTH_RADIUS_MILES = 3958.8;
-
-/** Great-circle distance between two WGS-84 coordinates, in miles. */
-export function haversineMiles(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return EARTH_RADIUS_MILES * 2 * Math.asin(Math.min(1, Math.sqrt(a)));
-}
-
 export type PropertyWithDistance = PropertyRow & { distance_miles: number };
 
 /**
@@ -546,6 +534,7 @@ export function findPropertiesWithinRadius(
         `${SELECT_PROPERTY}
        WHERE latitude IS NOT NULL
          AND longitude IS NOT NULL
+         AND standard_status = 'Closed'
          AND bedrooms >= @min_bedrooms
          AND bathrooms >= @min_bathrooms
          AND latitude BETWEEN @min_lat AND @max_lat
@@ -578,4 +567,86 @@ export function findPropertiesWithinRadius(
     .filter((row) => row.distance_miles <= radiusMiles)
     .sort((a, b) => a.distance_miles - b.distance_miles)
     .slice(0, limit);
+}
+
+const OPEN_STATUS_SQL = OPEN_LISTING_STATUSES.map((s) => `'${s}'`).join(", ");
+
+/**
+ * Active/pending listings within `radiusMiles` of a point with at least
+ * `minBedrooms` / `minBathrooms`. Source for open (on-market) comps.
+ */
+export function findActiveListingsWithinRadius(
+  db: MlsDatabase,
+  opts: {
+    latitude: number;
+    longitude: number;
+    radiusMiles: number;
+    minBedrooms: number;
+    minBathrooms: number;
+    excludeListingKey?: string;
+    limit?: number;
+  },
+): PropertyWithDistance[] {
+  const {
+    latitude,
+    longitude,
+    radiusMiles,
+    minBedrooms,
+    minBathrooms,
+    excludeListingKey,
+    limit = 50,
+  } = opts;
+
+  const latDelta = radiusMiles / 69;
+  const lonDelta =
+    radiusMiles / (69 * Math.cos((latitude * Math.PI) / 180));
+
+  const rows = normalizePropertyRows(
+    db
+      .prepare(
+        `${SELECT_PROPERTY}
+       WHERE latitude IS NOT NULL
+         AND longitude IS NOT NULL
+         AND bedrooms >= @min_bedrooms
+         AND bathrooms >= @min_bathrooms
+         AND list_price IS NOT NULL
+         AND list_price > 0
+         AND standard_status IN (${OPEN_STATUS_SQL})
+         AND latitude BETWEEN @min_lat AND @max_lat
+         AND longitude BETWEEN @min_lon AND @max_lon
+         AND (@exclude_listing_key IS NULL OR listing_key != @exclude_listing_key)`,
+      )
+      .all({
+        min_bedrooms: minBedrooms,
+        min_bathrooms: minBathrooms,
+        min_lat: latitude - latDelta,
+        max_lat: latitude + latDelta,
+        min_lon: longitude - lonDelta,
+        max_lon: longitude + lonDelta,
+        exclude_listing_key: excludeListingKey ?? null,
+      }) as unknown as PropertyRow[],
+  );
+
+  return rows
+    .map((row) => ({
+      ...row,
+      distance_miles: haversineMiles(
+        latitude,
+        longitude,
+        row.latitude!,
+        row.longitude!,
+      ),
+    }))
+    .filter((row) => row.distance_miles <= radiusMiles)
+    .sort((a, b) => a.distance_miles - b.distance_miles)
+    .slice(0, limit);
+}
+
+export function countOpenListings(db: MlsDatabase): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM properties WHERE standard_status IN (${OPEN_STATUS_SQL})`,
+    )
+    .get() as { n: number };
+  return row.n;
 }

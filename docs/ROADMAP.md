@@ -23,6 +23,7 @@ Living document for project phases, implementation status, and key decisions. Up
 | `pnpm install` / `pnpm dev` / `pnpm dev:api` | ✅ Complete | API on port 3001 in dev |
 | `.env.local` with `VITE_MLS_GRID_TOKEN` | ✅ Complete | Required for MLS Grid + seed |
 | `pnpm seed:mls` → `data/mls.sqlite` | ✅ Complete | Re-run only to refresh data |
+| `pnpm seed:mls:open` → same DB | ✅ Complete | Active/Pending open comps; re-run to refresh on-market listings |
 | `pnpm build` + `pnpm start` (prod locally) | ✅ Complete | Single server on port 3000 |
 | Vite proxies `/api` → `3001` in dev | ✅ Complete | `vite.config.ts` |
 
@@ -60,10 +61,10 @@ Living document for project phases, implementation status, and key decisions. Up
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 3.1 MLS active / pending pipeline | ⬜ To do | Separate seed or fetch for `StandardStatus` Active/Pending — **source of “open” comps** |
-| 3.2 `CompRecordDto` | ⬜ To do | Normalized comp with `source`, `compRole` (`sale_comp` \| `listing_comp` \| `tax_reference`) |
-| 3.3 Unified comparables API | ⬜ To do | e.g. `GET /api/comparables/unified` — MLS closed + MLS open + optional TCAD radius parcels |
-| 3.4 UI — separate comp sections | ⬜ To do | Label clearly: “Closed sales (MLS)”, “Active listings (MLS)”, “Nearby parcels (tax records)” |
+| 3.1 MLS active / pending pipeline | ✅ Complete | `pnpm seed:mls:open` — Active/Pending into same `properties` table; `findActiveListingsWithinRadius` |
+| 3.2 `CompRecordDto` | ✅ Complete | `shared/comparables/comp-record.ts` — `source`, `compRole` (`sale_comp` \| `listing_comp` \| `tax_reference`) |
+| 3.3 Unified comparables API | ✅ Complete | `GET /api/comparables/unified` — MLS closed + MLS open + optional TCAD (`includeTcad=true`) |
+| 3.4 UI — separate comp sections | ✅ Complete | `UnifiedComparablesResults` — closed / active / tax sections via unified API |
 | 3.5 Do not use TCAD appraised value as sale comps | ✅ Complete | Design decision — tax values are reference only |
 
 ---
@@ -99,6 +100,12 @@ curl -G "http://localhost:3001/api/properties/by-radius" \
   --data-urlencode "address=507 Hammack Dr Austin" \
   --data-urlencode "radiusMiles=2" \
   --data-urlencode "maxAgeMonths=12"
+
+curl -G "http://localhost:3001/api/comparables/unified" \
+  --data-urlencode "address=507 Hammack Dr Austin" \
+  --data-urlencode "radiusMiles=2" \
+  --data-urlencode "maxAgeMonths=12" \
+  --data-urlencode "includeTcad=true"
 ```
 
 Related: `/api/properties/suggest`, `/api/properties/by-address`
@@ -131,7 +138,8 @@ https://gis.traviscountytx.gov/server1/rest/services/Boundaries_and_Jurisdiction
 
 ```bash
 pnpm install
-pnpm seed:mls          # after .env.local; refreshes data/mls.sqlite
+pnpm seed:mls          # after .env.local; refreshes closed sales in data/mls.sqlite
+pnpm seed:mls:open     # active/pending open listings (same DB)
 pnpm dev:api           # Express API :3001
 pnpm dev               # Vite UI :3000 (proxies /api)
 pnpm build && pnpm start   # production-style :3000
@@ -141,8 +149,7 @@ pnpm build && pnpm start   # production-style :3000
 
 ## Suggested next work (in order)
 
-1. **Phase 3.1** — MLS active/pending feed for open comparables
-2. **Phase 4.1–4.3** — Flip prediction rules engine
+1. **Phase 4.1–4.3** — Flip prediction rules engine
 
 ---
 
@@ -152,11 +159,12 @@ pnpm build && pnpm start   # production-style :3000
 |------|--------|
 | Mile buckets | `shared/comparables/match-score.ts` |
 | Comp recency | `shared/comparables/recency.ts`, `scripts/mls-db.ts`, `server/routes/properties.ts` |
-| MLS schema / seed | `shared/mls/transform.ts`, `shared/mls/condition.ts`, `scripts/mls-db.ts`, `shared/mls/constants.ts` |
+| Unified comps | `shared/comparables/comp-record.ts`, `shared/comparables/unified-search.ts`, `server/routes/comparables.ts` |
+| MLS schema / seed | `shared/mls/transform.ts`, `shared/mls/condition.ts`, `scripts/mls-db.ts`, `shared/mls/constants.ts`, `scripts/seed-mls-open.ts` |
 | API DTOs | `shared/comparables/types.ts`, `shared/comparables/property-dto.ts`, `shared/comparables/format.ts` |
 | Property profile | `shared/property-profile/types.ts`, `shared/property-profile/compose.ts`, `shared/property-profile/fetch-profile.ts`, `server/routes/property-profile.ts` |
 | TCAD | `shared/tcad/*`, `server/routes/tcad.ts`, `server/app.ts` |
 | TCAD centroids | `shared/tcad/geometry.ts` |
-| Comparables UI | `client/src/components/comparables/ComparableDetailCard.tsx`, `ComparablesResults.tsx` |
+| Comparables UI | `client/src/components/comparables/ComparableDetailCard.tsx`, `CompRecordDetailCard.tsx`, `UnifiedComparablesResults.tsx` |
 
 See also: `LOCAL_DEVELOPMENT.md` for environment and troubleshooting.

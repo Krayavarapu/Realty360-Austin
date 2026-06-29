@@ -15,13 +15,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AddressSuggestInput } from "@/components/comparables/AddressSuggestInput";
-import { ComparablesResults } from "@/components/comparables/ComparablesResults";
+import { UnifiedComparablesResults } from "@/components/comparables/UnifiedComparablesResults";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   fetchAddressSuggestions,
-  fetchComparablesByRadius,
+  fetchUnifiedComparables,
   PropertiesApiError,
   validatePropertyAddress,
-  type ComparablesByRadiusResponse,
+  type UnifiedComparablesResponse,
 } from "@/lib/api/properties";
 
 const HERO_IMG =
@@ -38,9 +39,10 @@ export default function ComparablesLanding() {
   const [address, setAddress] = useState("");
   const [radiusMiles, setRadiusMiles] = useState("2");
   const [maxAgeMonths, setMaxAgeMonths] = useState("12");
+  const [includeTcad, setIncludeTcad] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ComparablesByRadiusResponse | null>(null);
+  const [result, setResult] = useState<UnifiedComparablesResponse | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -76,9 +78,10 @@ export default function ComparablesLanding() {
         }
       }
 
-      const data = await fetchComparablesByRadius(trimmed, radius, {
+      const data = await fetchUnifiedComparables(trimmed, radius, {
         maxAgeMonths:
           maxAgeMonths === "all" ? undefined : Number(maxAgeMonths),
+        includeTcad,
       });
       setResult(data);
     } catch (err) {
@@ -125,7 +128,8 @@ export default function ComparablesLanding() {
           className="text-base text-muted-foreground mb-6"
           style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          Enter address and search radius to get comparables now.
+          Enter address and search radius to get closed sales, active listings,
+          and optional nearby tax parcels.
         </p>
 
         <form onSubmit={handleSearch} className="blueprint-card p-6 space-y-5">
@@ -169,6 +173,26 @@ export default function ComparablesLanding() {
             </Select>
           </div>
 
+          <div className="flex items-start gap-3">
+            <Checkbox
+              id="include-tcad"
+              checked={includeTcad}
+              onCheckedChange={(checked) => setIncludeTcad(checked === true)}
+              disabled={loading}
+            />
+            <div className="grid gap-1 leading-none">
+              <Label
+                htmlFor="include-tcad"
+                className="text-sm font-medium cursor-pointer"
+              >
+                Include nearby tax parcels (TCAD)
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Tax appraised values are reference only — not sale comparables.
+              </p>
+            </div>
+          </div>
+
           <Button
             type="submit"
             disabled={loading}
@@ -187,7 +211,7 @@ export default function ComparablesLanding() {
 
         {result && (
           <div className="mt-10">
-            <ComparablesResults result={result} />
+            <UnifiedComparablesResults result={result} />
           </div>
         )}
       </div>

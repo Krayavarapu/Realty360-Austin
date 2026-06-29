@@ -8,6 +8,7 @@ import {
 } from "./address-query";
 import { TCAD_ARCGIS_QUERY_URL, TCAD_ARCGIS_WGS84_SR, TCAD_PROPERTY_OUT_FIELDS } from "./constants";
 import { centroidFromEsriPolygon, type TcadParcelCentroid } from "./geometry";
+import { haversineMiles } from "../comparables/geo";
 import { toTcadPropertyDto } from "./transform";
 import type {
   TcadArcGisAttributes,
@@ -298,4 +299,108 @@ export async function fetchTcadPropertyByAddress(
     query: outcome.query,
     matchedSitusAddress: outcome.matchedSitusAddress!,
   };
+}
+
+export type TcadParcelWithDistance = TcadPropertyDto & { distanceMiles: number };
+
+/**
+ * Parcels whose geometry intersects a buffer around a WGS-84 point.
+ * Tax values are reference only — not sale comps.
+ */
+export async function fetchTcadParcelsWithinRadius(opts: {
+  latitude: number;
+  longitude: number;
+  radiusMiles: number;
+  excludePropId?: number;
+  limit?: number;
+}): Promise<TcadParcelWithDistance[]> {
+  const {
+    latitude,
+    longitude,
+    radiusMiles,
+    excludePropId,
+    limit = 50,
+  } = opts;
+
+  const url = new URL(TCAD_ARCGIS_QUERY_URL);
+  url.searchParams.set(
+    "geometry",
+    JSON.stringify({
+      x: longitude,
+      y: latitude,
+      spatialReference: { wkid: TCAD_ARCGIS_WGS84_SR },
+    }),
+  );
+  url.searchParams.set("geometryType", "esriGeometryPoint");
+  url.searchParams.set("inSR", String(TCAD_ARCGIS_WGS84_SR));
+  url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+  url.searchParams.set("distance", String(radiusMiles));
+  url.searchParams.set("units", "esriSRUnit_StatuteMile");
+  url.searchParams.set("outFields", TCAD_PROPERTY_OUT_FIELDS);
+  url.searchParams.set("returnGeometry", "true");
+  url.searchParams.set("outSR", String(TCAD_ARCGIS_WGS84_SR));
+  url.searchParams.set("f", "json");
+  url.searchParams.set("resultRecordCount", String(Math.min(limit * 3, 200)));
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      throw new TcadApiError(
+        `TCAD ArcGIS radius request failed (${res.status})`,
+        502,
+      );
+    }
+
+    const body = (await res.json()) as TcadArcGisQueryResponse;
+    if (body.error?.message) {
+      throw new TcadApiError(
+        `TCAD ArcGIS error: ${body.error.message}`,
+        502,
+      );
+    }
+
+    const fetchedAt = new Date().toISOString();
+    const features = body.features ?? [];
+
+    return features
+      .map((feature) => {
+        const attrs = feature.attributes;
+        if (!attrs) return null;
+        const centroid = centroidFromEsriPolygon(feature.geometry?.rings);
+        if (!centroid) return null;
+        const distanceMiles = haversineMiles(
+          latitude,
+          longitude,
+          centroid.latitude,
+          centroid.longitude,
+        );
+        if (distanceMiles > radiusMiles) return null;
+        if (excludePropId != null && attrs.PROP_ID === excludePropId) {
+          return null;
+        }
+        return {
+          ...toTcadPropertyDto(attrs, fetchedAt, centroid),
+          distanceMiles,
+        };
+      })
+      .filter((row): row is TcadParcelWithDistance => row != null)
+      .sort((a, b) => a.distanceMiles - b.distanceMiles)
+      .slice(0, limit);
+  } catch (err) {
+    if (err instanceof TcadApiError) throw err;
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new TcadApiError("TCAD ArcGIS radius request timed out", 504);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new TcadApiError(`TCAD ArcGIS radius request failed: ${message}`, 502);
+  } finally {
+    clearTimeout(timeout);
+  }
 }

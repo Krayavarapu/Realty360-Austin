@@ -96,6 +96,17 @@ export function isUsableProperty(p: RESOProperty): boolean {
   return true;
 }
 
+/** Active/pending listings used as open comps — require list price, not close price. */
+export function isUsableListingProperty(p: RESOProperty): boolean {
+  const key = p.ListingKey ?? p.ListingId;
+  if (!key) return false;
+  const listPrice = p.ListPrice ?? p.OriginalListPrice ?? 0;
+  if (listPrice <= 0 || (p.LivingArea ?? 0) <= 0) return false;
+  const status = p.StandardStatus;
+  if (status !== "Active" && status !== "Pending") return false;
+  return true;
+}
+
 export function toCleanProperty(p: RESOProperty): CleanProperty {
   const listingKey = p.ListingKey ?? p.ListingId;
   const addressLine = buildAddressLine(p);
