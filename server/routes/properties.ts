@@ -3,6 +3,7 @@ import {
   bucketByMileRing,
   computeMatchPercent,
 } from "../../shared/comparables/match-score";
+import { minCloseDateForMaxAgeMonths } from "../../shared/comparables/recency";
 import {
   toPropertyDetailDto,
   toRadiusComparableDto,
@@ -30,6 +31,14 @@ function parseLimit(raw: unknown, fallback = 50): number | null {
   if (raw === undefined || raw === "") return fallback;
   const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
   if (!Number.isInteger(value) || value <= 0) return null;
+  return value;
+}
+
+/** Optional recency window in whole months (1–120). Omitted = no close-date filter. */
+function parseMaxAgeMonths(raw: unknown): number | null | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 120) return null;
   return value;
 }
 
@@ -140,10 +149,11 @@ propertiesRouter.get("/by-address", (req, res) => {
 });
 
 /**
- * GET /api/properties/by-radius?address=507 Hammack Dr, Austin&radiusMiles=2
+ * GET /api/properties/by-radius?address=507 Hammack Dr, Austin&radiusMiles=2&maxAgeMonths=12
  *
  * Resolves a subject property by address, then returns closed listings within
  * `radiusMiles` with bedrooms >= subject beds and bathrooms >= subject baths.
+ * Optional `maxAgeMonths` limits comps to sales closed within that many months.
  * Results include match %, mile-ring buckets, and full detail for property cards.
  */
 propertiesRouter.get("/by-radius", (req, res) => {
@@ -171,6 +181,19 @@ propertiesRouter.get("/by-radius", (req, res) => {
     });
     return;
   }
+
+  const maxAgeMonths = parseMaxAgeMonths(req.query.maxAgeMonths);
+  if (maxAgeMonths === null) {
+    res.status(400).json({
+      error: "Invalid query parameter: maxAgeMonths (integer 1–120)",
+    });
+    return;
+  }
+
+  const minCloseDate =
+    maxAgeMonths !== undefined
+      ? minCloseDateForMaxAgeMonths(maxAgeMonths)
+      : undefined;
 
   const addressNorm = normalizeAddress(raw);
   if (!addressNorm) {
@@ -221,6 +244,7 @@ propertiesRouter.get("/by-radius", (req, res) => {
         minBedrooms: subject.bedrooms,
         minBathrooms: subject.bathrooms,
         excludeListingKey: subject.listing_key,
+        minCloseDate,
         limit,
       });
 
@@ -250,6 +274,9 @@ propertiesRouter.get("/by-radius", (req, res) => {
         filters: {
           minBedrooms: subject.bedrooms,
           minBathrooms: subject.bathrooms,
+          ...(maxAgeMonths !== undefined
+            ? { maxAgeMonths, minCloseDate }
+            : {}),
         },
         subject: toPropertyDetailDto(subject),
         count: properties.length,

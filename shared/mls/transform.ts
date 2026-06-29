@@ -1,4 +1,5 @@
 import type { RESOProperty } from "./types";
+import { derivePropertyCondition } from "./condition";
 
 /** Row shape stored in `data/mls.sqlite` (`properties` table). */
 export interface CleanProperty {
@@ -19,10 +20,15 @@ export interface CleanProperty {
   bedrooms: number | null;
   bathrooms: number | null;
   living_area_sqft: number | null;
+  list_price: number | null;
   close_price: number | null;
   close_date: string | null;
   year_built: number | null;
   days_on_market: number | null;
+  has_pool: boolean | null;
+  garage_spaces: number | null;
+  lot_size_acres: number | null;
+  property_condition: string | null;
 }
 
 export function normalizeAddress(s: string): string {
@@ -55,10 +61,49 @@ function formatCloseDate(raw?: string): string | null {
   return raw.slice(0, 10);
 }
 
+export function deriveHasPool(p: RESOProperty): boolean | null {
+  if (p.PoolPrivateYN === true) return true;
+  if (p.PoolPrivateYN === false) return false;
+  const features = p.PoolFeatures ?? [];
+  if (features.length > 0) return true;
+  return null;
+}
+
+export function deriveGarageSpaces(p: RESOProperty): number | null {
+  const spaces = p.GarageSpaces ?? p.CoveredSpaces;
+  if (spaces == null || spaces <= 0) return null;
+  return spaces;
+}
+
+export function deriveLotSizeAcres(p: RESOProperty): number | null {
+  if (p.LotSizeAcres != null && p.LotSizeAcres > 0) return p.LotSizeAcres;
+  if (p.LotSizeSquareFeet != null && p.LotSizeSquareFeet > 0) {
+    return p.LotSizeSquareFeet / 43_560;
+  }
+  return null;
+}
+
+export function deriveHasGarage(p: RESOProperty): boolean | null {
+  const spaces = deriveGarageSpaces(p);
+  if (spaces == null) return null;
+  return spaces > 0;
+}
+
 export function isUsableProperty(p: RESOProperty): boolean {
   const key = p.ListingKey ?? p.ListingId;
   if (!key) return false;
   if ((p.ClosePrice ?? 0) <= 0 || (p.LivingArea ?? 0) <= 0) return false;
+  return true;
+}
+
+/** Active/pending listings used as open comps — require list price, not close price. */
+export function isUsableListingProperty(p: RESOProperty): boolean {
+  const key = p.ListingKey ?? p.ListingId;
+  if (!key) return false;
+  const listPrice = p.ListPrice ?? p.OriginalListPrice ?? 0;
+  if (listPrice <= 0 || (p.LivingArea ?? 0) <= 0) return false;
+  const status = p.StandardStatus;
+  if (status !== "Active" && status !== "Pending") return false;
   return true;
 }
 
@@ -91,9 +136,14 @@ export function toCleanProperty(p: RESOProperty): CleanProperty {
     bedrooms: p.BedroomsTotal ?? null,
     bathrooms: totalBaths(p),
     living_area_sqft: p.LivingArea ?? null,
+    list_price: p.ListPrice ?? p.OriginalListPrice ?? null,
     close_price: p.ClosePrice ?? null,
     close_date: formatCloseDate(p.CloseDate),
     year_built: p.YearBuilt ?? null,
     days_on_market: p.DaysOnMarket ?? p.CumulativeDaysOnMarket ?? null,
+    has_pool: deriveHasPool(p),
+    garage_spaces: deriveGarageSpaces(p),
+    lot_size_acres: deriveLotSizeAcres(p),
+    property_condition: derivePropertyCondition(p),
   };
 }

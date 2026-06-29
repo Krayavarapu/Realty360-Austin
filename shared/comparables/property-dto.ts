@@ -1,5 +1,6 @@
 import { formatPropertyAddress, formatSoldDate } from "./format";
 import type { PropertyDetailDto, RadiusComparableDto } from "./types";
+import { formatPropertyConditionLabel } from "../mls/condition";
 
 /** Minimal row shape from SQLite `properties` used to build API DTOs. */
 export interface PropertyRowLike {
@@ -12,6 +13,7 @@ export interface PropertyRowLike {
   bedrooms: number | null;
   bathrooms: number | null;
   living_area_sqft: number | null;
+  list_price?: number | null;
   close_price: number | null;
   close_date: string | null;
   year_built: number | null;
@@ -20,6 +22,15 @@ export interface PropertyRowLike {
   property_type: string | null;
   latitude: number | null;
   longitude: number | null;
+  has_pool?: boolean | null;
+  garage_spaces?: number | null;
+  lot_size_acres?: number | null;
+  property_condition?: string | null;
+}
+
+function normalizeHasPool(value: unknown): boolean | null {
+  if (value === null || value === undefined) return null;
+  return value === true || value === 1;
 }
 
 export function toPropertyDetailDto(row: PropertyRowLike): PropertyDetailDto {
@@ -29,6 +40,9 @@ export function toPropertyDetailDto(row: PropertyRowLike): PropertyDetailDto {
     closePrice != null && sqft != null && sqft > 0
       ? Math.round(closePrice / sqft)
       : null;
+  const garageSpaces = row.garage_spaces ?? null;
+  const hasPool = normalizeHasPool(row.has_pool);
+  const condition = row.property_condition ?? null;
 
   return {
     listingKey: row.listing_key,
@@ -41,6 +55,7 @@ export function toPropertyDetailDto(row: PropertyRowLike): PropertyDetailDto {
     bedrooms: row.bedrooms,
     bathrooms: row.bathrooms,
     livingAreaSqft: sqft,
+    listPrice: row.list_price ?? null,
     closePrice,
     closeDate: row.close_date,
     soldDate: formatSoldDate(row.close_date),
@@ -49,6 +64,11 @@ export function toPropertyDetailDto(row: PropertyRowLike): PropertyDetailDto {
     standardStatus: row.standard_status,
     propertyType: row.property_type,
     pricePerSqft,
+    hasPool,
+    hasGarage: garageSpaces != null ? garageSpaces > 0 : null,
+    garageSpaces,
+    lotSizeAcres: row.lot_size_acres ?? null,
+    condition: condition ? formatPropertyConditionLabel(condition) : null,
     latitude: row.latitude,
     longitude: row.longitude,
   };

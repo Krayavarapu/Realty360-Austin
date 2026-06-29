@@ -11,6 +11,7 @@
     "preview": "vite preview --host",
     "check": "tsc --noEmit",
     "seed:mls": "tsx scripts/seed-mls.ts",
+    "seed:mls:open": "tsx scripts/seed-mls-open.ts",
     "format": "prettier --write ."
   },
   "dependencies": {

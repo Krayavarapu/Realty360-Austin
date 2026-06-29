@@ -42,3 +42,26 @@ export function formatPrice(n: number): string {
 export function formatDistanceMiles(miles: number): string {
   return miles < 10 ? `${miles.toFixed(2)} mi` : `${miles.toFixed(1)} mi`;
 }
+
+export function formatOptionalYesNo(value: boolean | null | undefined): string {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "—";
+}
+
+export function formatLotAcres(acres: number | null | undefined): string {
+  if (acres == null || acres <= 0) return "—";
+  return acres < 10 ? `${acres.toFixed(2)} ac` : `${acres.toFixed(1)} ac`;
+}
+
+export function formatGarageSpaces(
+  spaces: number | null | undefined,
+  hasGarage: boolean | null | undefined,
+): string {
+  if (spaces != null && spaces > 0) {
+    return spaces === 1 ? "1 space" : `${spaces} spaces`;
+  }
+  if (hasGarage === true) return "Yes";
+  if (hasGarage === false) return "No";
+  return "—";
+}

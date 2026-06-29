@@ -1,6 +1,7 @@
 import type {
   ComparablesByRadiusResponse,
   PropertyDetailDto,
+  UnifiedComparablesResponse,
 } from "@shared/comparables/types";
 
 export type {
@@ -28,7 +29,7 @@ export class PropertiesApiError extends Error {
 export async function fetchComparablesByRadius(
   address: string,
   radiusMiles: number,
-  opts?: { limit?: number },
+  opts?: { limit?: number; maxAgeMonths?: number },
 ): Promise<ComparablesByRadiusResponse> {
   const params = new URLSearchParams({
     address: address.trim(),
@@ -36,6 +37,9 @@ export async function fetchComparablesByRadius(
   });
   if (opts?.limit != null) {
     params.set("limit", String(opts.limit));
+  }
+  if (opts?.maxAgeMonths != null) {
+    params.set("maxAgeMonths", String(opts.maxAgeMonths));
   }
 
   const res = await fetch(`/api/properties/by-radius?${params}`);
@@ -105,4 +109,54 @@ export async function validatePropertyAddress(address: string): Promise<boolean>
     throw new PropertiesApiError(message, res.status, body);
   }
   return false;
+}
+
+export type {
+  CompRecordDto,
+  CompRole,
+  CompSource,
+  UnifiedComparablesResponse,
+} from "@shared/comparables/types";
+
+export async function fetchUnifiedComparables(
+  address: string,
+  radiusMiles: number,
+  opts?: {
+    propId?: number;
+    limit?: number;
+    maxAgeMonths?: number;
+    includeTcad?: boolean;
+  },
+): Promise<UnifiedComparablesResponse> {
+  const params = new URLSearchParams({
+    radiusMiles: String(radiusMiles),
+  });
+  if (address.trim()) {
+    params.set("address", address.trim());
+  }
+  if (opts?.propId != null) {
+    params.set("propId", String(opts.propId));
+  }
+  if (opts?.limit != null) {
+    params.set("limit", String(opts.limit));
+  }
+  if (opts?.maxAgeMonths != null) {
+    params.set("maxAgeMonths", String(opts.maxAgeMonths));
+  }
+  if (opts?.includeTcad) {
+    params.set("includeTcad", "true");
+  }
+
+  const res = await fetch(`/api/comparables/unified?${params}`);
+  const body = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const message =
+      typeof body?.error === "string"
+        ? body.error
+        : `Request failed (${res.status})`;
+    throw new PropertiesApiError(message, res.status, body);
+  }
+
+  return body as UnifiedComparablesResponse;
 }

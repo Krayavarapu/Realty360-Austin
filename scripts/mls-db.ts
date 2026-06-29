@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { haversineMiles } from "../shared/comparables/geo";
 import {
   addressQueryMatchesProperty,
   buildAddressLookupPrefixes,
   buildCanonicalAddressNorm,
   parseAddressQuery,
 } from "../shared/mls/address-query";
+import { OPEN_LISTING_STATUSES } from "../shared/mls/constants";
 import { resolveMlsDbPath } from "../shared/mls/db-path";
 import type { CleanProperty } from "../shared/mls/transform";
 import { normalizeAddress } from "../shared/mls/transform";
@@ -32,10 +34,15 @@ CREATE TABLE IF NOT EXISTS properties (
   bedrooms          INTEGER,
   bathrooms         REAL,
   living_area_sqft  INTEGER,
+  list_price        INTEGER,
   close_price       INTEGER,
   close_date        TEXT,
   year_built        INTEGER,
   days_on_market    INTEGER,
+  has_pool          INTEGER,
+  garage_spaces     INTEGER,
+  lot_size_acres    REAL,
+  property_condition TEXT,
   updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -43,21 +50,61 @@ CREATE INDEX IF NOT EXISTS idx_properties_address_norm ON properties(address_nor
 CREATE INDEX IF NOT EXISTS idx_properties_address_line ON properties(address_line);
 CREATE INDEX IF NOT EXISTS idx_properties_city ON properties(city);
 CREATE INDEX IF NOT EXISTS idx_properties_listing_id ON properties(listing_id);
+CREATE INDEX IF NOT EXISTS idx_properties_close_date ON properties(close_date);
+CREATE INDEX IF NOT EXISTS idx_properties_standard_status ON properties(standard_status);
 `;
+
+/** Columns added after initial schema — applied via ALTER for existing DBs. */
+const SCHEMA_MIGRATIONS: ReadonlyArray<readonly [string, string]> = [
+  ["list_price", "INTEGER"],
+  ["has_pool", "INTEGER"],
+  ["garage_spaces", "INTEGER"],
+  ["lot_size_acres", "REAL"],
+  ["property_condition", "TEXT"],
+];
+
+function ensureSchemaMigrations(db: MlsDatabase): void {
+  const existing = new Set(
+    (
+      db.prepare("PRAGMA table_info(properties)").all() as { name: string }[]
+    ).map((row) => row.name),
+  );
+  for (const [column, sqlType] of SCHEMA_MIGRATIONS) {
+    if (!existing.has(column)) {
+      db.exec(`ALTER TABLE properties ADD COLUMN ${column} ${sqlType}`);
+    }
+  }
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_properties_close_date ON properties(close_date)",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_properties_standard_status ON properties(standard_status)",
+  );
+}
+
+function toSqliteRow(row: CleanProperty): Record<string, SQLInputValue> {
+  return {
+    ...row,
+    has_pool:
+      row.has_pool === null ? null : row.has_pool ? 1 : 0,
+  };
+}
 
 const UPSERT = `
 INSERT INTO properties (
   listing_key, listing_id, address_line, address_norm,
   street_number, street_name, street_suffix, city, postal_code, state,
   latitude, longitude, standard_status, property_type,
-  bedrooms, bathrooms, living_area_sqft, close_price, close_date,
-  year_built, days_on_market, updated_at
+  bedrooms, bathrooms, living_area_sqft, list_price, close_price, close_date,
+  year_built, days_on_market, has_pool, garage_spaces, lot_size_acres,
+  property_condition, updated_at
 ) VALUES (
   @listing_key, @listing_id, @address_line, @address_norm,
   @street_number, @street_name, @street_suffix, @city, @postal_code, @state,
   @latitude, @longitude, @standard_status, @property_type,
-  @bedrooms, @bathrooms, @living_area_sqft, @close_price, @close_date,
-  @year_built, @days_on_market, datetime('now')
+  @bedrooms, @bathrooms, @living_area_sqft, @list_price, @close_price, @close_date,
+  @year_built, @days_on_market, @has_pool, @garage_spaces, @lot_size_acres,
+  @property_condition, datetime('now')
 )
 ON CONFLICT(listing_key) DO UPDATE SET
   listing_id = excluded.listing_id,
@@ -76,10 +123,15 @@ ON CONFLICT(listing_key) DO UPDATE SET
   bedrooms = excluded.bedrooms,
   bathrooms = excluded.bathrooms,
   living_area_sqft = excluded.living_area_sqft,
+  list_price = excluded.list_price,
   close_price = excluded.close_price,
   close_date = excluded.close_date,
   year_built = excluded.year_built,
   days_on_market = excluded.days_on_market,
+  has_pool = excluded.has_pool,
+  garage_spaces = excluded.garage_spaces,
+  lot_size_acres = excluded.lot_size_acres,
+  property_condition = excluded.property_condition,
   updated_at = datetime('now');
 `;
 
@@ -88,6 +140,7 @@ export type MlsDatabase = DatabaseSync;
 export function openMlsDb(dbPath: string): MlsDatabase {
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA);
+  ensureSchemaMigrations(db);
   return db;
 }
 
@@ -96,7 +149,7 @@ export function upsertProperties(db: MlsDatabase, rows: CleanProperty[]): void {
   db.exec("BEGIN");
   try {
     for (const row of rows) {
-      stmt.run(row as unknown as Record<string, SQLInputValue>);
+      stmt.run(toSqliteRow(row));
     }
     db.exec("COMMIT");
   } catch (err) {
@@ -127,19 +180,36 @@ SELECT
   listing_key, listing_id, address_line, address_norm,
   street_number, street_name, street_suffix, city, postal_code, state,
   latitude, longitude, standard_status, property_type,
-  bedrooms, bathrooms, living_area_sqft, close_price, close_date,
-  year_built, days_on_market, updated_at
+  bedrooms, bathrooms, living_area_sqft, list_price, close_price, close_date,
+  year_built, days_on_market, has_pool, garage_spaces, lot_size_acres,
+  property_condition, updated_at
 FROM properties
 `;
+
+function normalizePropertyRow(row: PropertyRow): PropertyRow {
+  const pool = row.has_pool as boolean | number | null | undefined;
+  return {
+    ...row,
+    has_pool:
+      pool === null || pool === undefined
+        ? null
+        : pool === true || pool === 1,
+  };
+}
+
+function normalizePropertyRows(rows: PropertyRow[]): PropertyRow[] {
+  return rows.map(normalizePropertyRow);
+}
 
 /** Exact match on `address_norm`. */
 export function findPropertyByAddressNorm(
   db: MlsDatabase,
   addressNorm: string,
 ): PropertyRow | undefined {
-  return db
+  const row = db
     .prepare(`${SELECT_PROPERTY} WHERE address_norm = @address_norm LIMIT 1`)
     .get({ address_norm: addressNorm }) as PropertyRow | undefined;
+  return row ? normalizePropertyRow(row) : undefined;
 }
 
 /**
@@ -150,7 +220,7 @@ export function findPropertyByAddressPrefix(
   db: MlsDatabase,
   addressNorm: string,
 ): PropertyRow | undefined {
-  return db
+  const row = db
     .prepare(
       `${SELECT_PROPERTY}
        WHERE address_norm = @address_norm
@@ -162,6 +232,7 @@ export function findPropertyByAddressPrefix(
       address_norm: addressNorm,
       prefix: `${addressNorm} %`,
     }) as PropertyRow | undefined;
+  return row ? normalizePropertyRow(row) : undefined;
 }
 
 /**
@@ -172,7 +243,7 @@ export function searchPropertiesByAddress(
   addressNorm: string,
   limit = 10,
 ): PropertyRow[] {
-  return db
+  const rows = db
     .prepare(
       `${SELECT_PROPERTY}
        WHERE address_norm LIKE '%' || @address_norm || '%'
@@ -180,6 +251,7 @@ export function searchPropertiesByAddress(
        LIMIT @limit`,
     )
     .all({ address_norm: addressNorm, limit }) as unknown as PropertyRow[];
+  return normalizePropertyRows(rows);
 }
 
 const MIN_SUGGEST_QUERY_LEN = 2;
@@ -200,9 +272,10 @@ export function suggestPropertiesByAddress(
     return [];
   }
 
-  return db
-    .prepare(
-      `${SELECT_PROPERTY}
+  return normalizePropertyRows(
+    db
+      .prepare(
+        `${SELECT_PROPERTY}
        WHERE address_line LIKE @line_prefix
           OR address_norm LIKE @norm_prefix
           OR address_norm LIKE '%' || @norm || '%'
@@ -214,13 +287,14 @@ export function suggestPropertiesByAddress(
          END,
          address_line
        LIMIT @limit`,
-    )
-    .all({
-      line_prefix: `${trimmed}%`,
-      norm_prefix: `${norm}%`,
-      norm,
-      limit,
-    }) as unknown as PropertyRow[];
+      )
+      .all({
+        line_prefix: `${trimmed}%`,
+        norm_prefix: `${norm}%`,
+        norm,
+        limit,
+      }) as unknown as PropertyRow[],
+  );
 }
 
 /**
@@ -252,7 +326,8 @@ export function findPropertyByStreetCityState(
 
   sql += ` ORDER BY address_line LIMIT 1`;
 
-  return db.prepare(sql).get(params) as PropertyRow | undefined;
+  const row = db.prepare(sql).get(params) as PropertyRow | undefined;
+  return row ? normalizePropertyRow(row) : undefined;
 }
 
 export function searchPropertiesByStreetCityState(
@@ -284,7 +359,9 @@ export function searchPropertiesByStreetCityState(
 
   sql += ` ORDER BY address_line LIMIT @limit`;
 
-  return db.prepare(sql).all(params) as unknown as PropertyRow[];
+  return normalizePropertyRows(
+    db.prepare(sql).all(params) as unknown as PropertyRow[],
+  );
 }
 
 export type AddressResolveMatch = "exact" | "prefix" | "partial" | "structured";
@@ -416,24 +493,6 @@ export function resolvePropertyByAddress(
   };
 }
 
-const EARTH_RADIUS_MILES = 3958.8;
-
-/** Great-circle distance between two WGS-84 coordinates, in miles. */
-export function haversineMiles(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return EARTH_RADIUS_MILES * 2 * Math.asin(Math.min(1, Math.sqrt(a)));
-}
-
 export type PropertyWithDistance = PropertyRow & { distance_miles: number };
 
 /**
@@ -441,6 +500,82 @@ export type PropertyWithDistance = PropertyRow & { distance_miles: number };
  * `minBathrooms`. Uses a bounding-box SQL pre-filter, then Haversine distance in JS.
  */
 export function findPropertiesWithinRadius(
+  db: MlsDatabase,
+  opts: {
+    latitude: number;
+    longitude: number;
+    radiusMiles: number;
+    minBedrooms: number;
+    minBathrooms: number;
+    excludeListingKey?: string;
+    /** Only include sales with `close_date` on or after this cutoff (YYYY-MM-DD). */
+    minCloseDate?: string;
+    limit?: number;
+  },
+): PropertyWithDistance[] {
+  const {
+    latitude,
+    longitude,
+    radiusMiles,
+    minBedrooms,
+    minBathrooms,
+    excludeListingKey,
+    minCloseDate,
+    limit = 50,
+  } = opts;
+
+  const latDelta = radiusMiles / 69;
+  const lonDelta =
+    radiusMiles / (69 * Math.cos((latitude * Math.PI) / 180));
+
+  const rows = normalizePropertyRows(
+    db
+      .prepare(
+        `${SELECT_PROPERTY}
+       WHERE latitude IS NOT NULL
+         AND longitude IS NOT NULL
+         AND standard_status = 'Closed'
+         AND bedrooms >= @min_bedrooms
+         AND bathrooms >= @min_bathrooms
+         AND latitude BETWEEN @min_lat AND @max_lat
+         AND longitude BETWEEN @min_lon AND @max_lon
+         AND (@exclude_listing_key IS NULL OR listing_key != @exclude_listing_key)
+         AND (@min_close_date IS NULL OR (close_date IS NOT NULL AND close_date >= @min_close_date))`,
+      )
+      .all({
+        min_bedrooms: minBedrooms,
+        min_bathrooms: minBathrooms,
+        min_lat: latitude - latDelta,
+        max_lat: latitude + latDelta,
+        min_lon: longitude - lonDelta,
+        max_lon: longitude + lonDelta,
+        exclude_listing_key: excludeListingKey ?? null,
+        min_close_date: minCloseDate ?? null,
+      }) as unknown as PropertyRow[],
+  );
+
+  return rows
+    .map((row) => ({
+      ...row,
+      distance_miles: haversineMiles(
+        latitude,
+        longitude,
+        row.latitude!,
+        row.longitude!,
+      ),
+    }))
+    .filter((row) => row.distance_miles <= radiusMiles)
+    .sort((a, b) => a.distance_miles - b.distance_miles)
+    .slice(0, limit);
+}
+
+const OPEN_STATUS_SQL = OPEN_LISTING_STATUSES.map((s) => `'${s}'`).join(", ");
+
+/**
+ * Active/pending listings within `radiusMiles` of a point with at least
+ * `minBedrooms` / `minBathrooms`. Source for open (on-market) comps.
+ */
+export function findActiveListingsWithinRadius(
   db: MlsDatabase,
   opts: {
     latitude: number;
@@ -466,26 +601,31 @@ export function findPropertiesWithinRadius(
   const lonDelta =
     radiusMiles / (69 * Math.cos((latitude * Math.PI) / 180));
 
-  const rows = db
-    .prepare(
-      `${SELECT_PROPERTY}
+  const rows = normalizePropertyRows(
+    db
+      .prepare(
+        `${SELECT_PROPERTY}
        WHERE latitude IS NOT NULL
          AND longitude IS NOT NULL
          AND bedrooms >= @min_bedrooms
          AND bathrooms >= @min_bathrooms
+         AND list_price IS NOT NULL
+         AND list_price > 0
+         AND standard_status IN (${OPEN_STATUS_SQL})
          AND latitude BETWEEN @min_lat AND @max_lat
          AND longitude BETWEEN @min_lon AND @max_lon
          AND (@exclude_listing_key IS NULL OR listing_key != @exclude_listing_key)`,
-    )
-    .all({
-      min_bedrooms: minBedrooms,
-      min_bathrooms: minBathrooms,
-      min_lat: latitude - latDelta,
-      max_lat: latitude + latDelta,
-      min_lon: longitude - lonDelta,
-      max_lon: longitude + lonDelta,
-      exclude_listing_key: excludeListingKey ?? null,
-    }) as unknown as PropertyRow[];
+      )
+      .all({
+        min_bedrooms: minBedrooms,
+        min_bathrooms: minBathrooms,
+        min_lat: latitude - latDelta,
+        max_lat: latitude + latDelta,
+        min_lon: longitude - lonDelta,
+        max_lon: longitude + lonDelta,
+        exclude_listing_key: excludeListingKey ?? null,
+      }) as unknown as PropertyRow[],
+  );
 
   return rows
     .map((row) => ({
@@ -500,4 +640,13 @@ export function findPropertiesWithinRadius(
     .filter((row) => row.distance_miles <= radiusMiles)
     .sort((a, b) => a.distance_miles - b.distance_miles)
     .slice(0, limit);
+}
+
+export function countOpenListings(db: MlsDatabase): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM properties WHERE standard_status IN (${OPEN_STATUS_SQL})`,
+    )
+    .get() as { n: number };
+  return row.n;
 }
