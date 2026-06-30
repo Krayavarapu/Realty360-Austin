@@ -73,9 +73,9 @@ Living document for project phases, implementation status, and key decisions. Up
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 4.1 Rehab / deal config (Travis County) | ⬜ To do | `$ / sqft` by tier, closing %, hold defaults, financing defaults |
-| 4.2 `FlipPredictionRequest` / `FlipPredictionResponse` schema | ⬜ To do | Sketched; enriched mode: `propId` + `purchasePrice` + `scopeTier` |
-| 4.3 `POST /predict/flip` — rules engine v0 | ⬜ To do | ARV from comp median + rehab tier × sqft + margin math (no ML yet) |
+| 4.1 Rehab / deal config (Travis County) | ✅ Complete | `shared/flip/` — rehab tiers ($/sqft), closing %, hold & financing defaults + cost helpers |
+| 4.2 `FlipPredictionRequest` / `FlipPredictionResponse` schema | ✅ Complete | `shared/flip/prediction-types.ts`, `prediction-schema.ts` (Zod + enriched/manual modes) |
+| 4.3 `POST /predict/flip` — rules engine v0 | ✅ Complete | `shared/flip/predict-flip.ts`, `POST /api/predict/flip` — comp median ARV + margin math |
 | 4.4 Stack decision | ✅ Complete | Python for modeling later; TypeScript/Express for app; optional FastAPI microservice |
 
 ---
@@ -126,6 +126,20 @@ curl -G "http://localhost:3001/api/property/profile" \
 curl "http://localhost:3001/api/tcad/property?propId=984219"
 ```
 
+### Flip prediction (rules engine v0)
+
+```bash
+# Enriched — profile + closed-comp median ARV
+curl -sS -X POST "http://localhost:3001/api/predict/flip" \
+  -H "Content-Type: application/json" \
+  -d '{"address":"507 Hammack Dr Austin","purchasePrice":350000,"scopeTier":"moderate","maxAgeMonths":12}'
+
+# Manual — explicit ARV and sqft
+curl -sS -X POST "http://localhost:3001/api/predict/flip" \
+  -H "Content-Type: application/json" \
+  -d '{"purchasePrice":200000,"scopeTier":"cosmetic","arv":320000,"livingAreaSqft":1200}'
+```
+
 **Upstream ArcGIS (correct layer):**
 
 ```
@@ -149,7 +163,8 @@ pnpm build && pnpm start   # production-style :3000
 
 ## Suggested next work (in order)
 
-1. **Phase 4.1–4.3** — Flip prediction rules engine
+1. **Phase 5.1** — Neon / Postgres for MLS cache + scheduled open-listing refresh
+2. **Flip UI** — wire `POST /api/predict/flip` into calculator or comparables flow
 
 ---
 
@@ -160,6 +175,7 @@ pnpm build && pnpm start   # production-style :3000
 | Mile buckets | `shared/comparables/match-score.ts` |
 | Comp recency | `shared/comparables/recency.ts`, `scripts/mls-db.ts`, `server/routes/properties.ts` |
 | Unified comps | `shared/comparables/comp-record.ts`, `shared/comparables/unified-search.ts`, `server/routes/comparables.ts` |
+| Flip deal config | `shared/flip/types.ts`, `shared/flip/config.ts`, `shared/flip/deal-costs.ts`, `shared/flip/prediction-types.ts`, `shared/flip/prediction-schema.ts`, `shared/flip/predict-flip.ts`, `server/routes/predict.ts` |
 | MLS schema / seed | `shared/mls/transform.ts`, `shared/mls/condition.ts`, `scripts/mls-db.ts`, `shared/mls/constants.ts`, `scripts/seed-mls-open.ts` |
 | API DTOs | `shared/comparables/types.ts`, `shared/comparables/property-dto.ts`, `shared/comparables/format.ts` |
 | Property profile | `shared/property-profile/types.ts`, `shared/property-profile/compose.ts`, `shared/property-profile/fetch-profile.ts`, `server/routes/property-profile.ts` |
