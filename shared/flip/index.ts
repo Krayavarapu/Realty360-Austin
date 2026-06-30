@@ -26,3 +26,24 @@ export type {
   RehabScopeTier,
   RehabTierConfig,
 } from "./types";
+export type {
+  FlipArvEstimate,
+  FlipArvSource,
+  FlipPredictionCosts,
+  FlipPredictionMargins,
+  FlipPredictionMode,
+  FlipPredictionProvenance,
+  FlipPredictionRequest,
+  FlipPredictionRequestResolved,
+  FlipPredictionResolvedSubject,
+  FlipPredictionResponse,
+  FlipViability,
+} from "./prediction-types";
+export {
+  flipPredictionRequestSchema,
+  FlipPredictionValidationError,
+  isRehabScopeTier,
+  parseFlipPredictionRequest,
+  rehabScopeTierSchema,
+  resolveFlipPredictionRequest,
+} from "./prediction-schema";
