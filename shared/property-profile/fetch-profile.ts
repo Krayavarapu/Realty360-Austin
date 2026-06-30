@@ -83,6 +83,10 @@ function tcadCandidatesFromDtos(
   return dtos.map((tcad) => tcadPropertyToTaxCandidate(tcad));
 }
 
+function mlsHasCoordinates(mls: PropertyDetailDto | null | undefined): boolean {
+  return mls?.latitude != null && mls?.longitude != null;
+}
+
 /**
  * Enrich a subject from TCAD and/or MLS SQLite.
  *
@@ -130,26 +134,33 @@ export async function fetchPropertyProfile(
       ? buildTcadMatch("single")
       : buildTcadMatch("not_found", "No TCAD property found for that propId");
   } else if (address) {
-    let tcadQuery = address;
-    if (mls?.postalCode && !address.includes(mls.postalCode)) {
-      tcadQuery = `${address} ${mls.postalCode}`;
-    }
-
-    const outcome = await fetchTcadAddressLookupOutcome(tcadQuery);
-    if (outcome.status === "single" && outcome.property) {
-      tcad = outcome.property;
-      tcadMatch = buildTcadMatch("single");
-    } else if (outcome.status === "ambiguous") {
-      taxCandidates = tcadCandidatesFromDtos(outcome.candidates);
+    if (mlsHasCoordinates(mls)) {
       tcadMatch = buildTcadMatch(
-        "ambiguous",
-        "Multiple TCAD tax records match this address; choose a propId from taxCandidates",
+        "none",
+        "TCAD skipped — MLS listing has coordinates",
       );
     } else {
-      tcadMatch = buildTcadMatch(
-        "not_found",
-        "No TCAD property found for that address",
-      );
+      let tcadQuery = address;
+      if (mls?.postalCode && !address.includes(mls.postalCode)) {
+        tcadQuery = `${address} ${mls.postalCode}`;
+      }
+
+      const outcome = await fetchTcadAddressLookupOutcome(tcadQuery);
+      if (outcome.status === "single" && outcome.property) {
+        tcad = outcome.property;
+        tcadMatch = buildTcadMatch("single");
+      } else if (outcome.status === "ambiguous") {
+        taxCandidates = tcadCandidatesFromDtos(outcome.candidates);
+        tcadMatch = buildTcadMatch(
+          "ambiguous",
+          "Multiple TCAD tax records match this address; choose a propId from taxCandidates",
+        );
+      } else {
+        tcadMatch = buildTcadMatch(
+          "not_found",
+          "No TCAD property found for that address",
+        );
+      }
     }
   }
 

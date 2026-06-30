@@ -6,6 +6,7 @@ import type {
   UnifiedComparablesResponse,
 } from "@shared/comparables/types";
 import { CompRecordDetailCard } from "./CompRecordDetailCard";
+import { SubjectPropertyCard } from "./SubjectPropertyCard";
 
 interface UnifiedComparablesResultsProps {
   result: UnifiedComparablesResponse;
@@ -153,50 +154,13 @@ export function UnifiedComparablesResults({
     result.subjectTcad?.situsAddress ??
     "subject property";
 
-  const subjectBeds = result.subject?.bedrooms ?? result.filters.minBedrooms;
-  const subjectBaths = result.subject?.bathrooms ?? result.filters.minBathrooms;
-
   function handleToggle(key: string) {
     setOpenKey((prev) => (prev === key ? null : key));
   }
 
   return (
     <div className="space-y-10">
-      <div className="blueprint-card p-4 text-sm">
-        <div className="section-label mb-1">Subject property</div>
-        <div
-          className="font-medium"
-          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-        >
-          {subjectLabel}
-        </div>
-        <div className="text-xs text-muted-foreground mt-1 font-mono">
-          {subjectBeds ?? "—"} bed / {subjectBaths ?? "—"} bath
-          {" · "}
-          {result.radiusMiles} mi radius
-          {result.filters.maxAgeMonths != null && (
-            <>
-              {" · "}
-              closed sales last {result.filters.maxAgeMonths} mo
-            </>
-          )}
-          {" · "}
-          {result.count} total comparable{result.count === 1 ? "" : "s"}
-        </div>
-        <div className="flex flex-wrap gap-3 mt-3 text-xs font-mono">
-          <span className="text-teal-400/90">
-            {result.sections.closedSales.count} closed
-          </span>
-          <span className="text-amber-400/90">
-            {result.sections.openListings.count} on market
-          </span>
-          {result.filters.includeTcad && (
-            <span className="text-muted-foreground">
-              {result.sections.taxReferences?.count ?? 0} tax parcels
-            </span>
-          )}
-        </div>
-      </div>
+      <SubjectPropertyCard result={result} />
 
       <CompSection
         section={result.sections.closedSales}

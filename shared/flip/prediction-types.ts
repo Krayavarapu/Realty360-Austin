@@ -54,16 +54,48 @@ export interface FlipPredictionResolvedSubject {
   bathrooms: number | null;
 }
 
-export type FlipArvSource = "comp_median" | "manual_override";
+export type FlipArvSource = "comp_median_psf" | "manual_override";
+
+export type FlipArvSliceMethod =
+  | "all_similar_median"
+  | "top_half_median"
+  | "top_quartile_median";
+
+export interface FlipArvCompRecord {
+  address: string;
+  closePrice: number;
+  livingAreaSqft: number;
+  bedrooms: number;
+  bathrooms: number;
+  distanceMiles: number;
+  pricePerSqft: number;
+}
 
 export interface FlipArvEstimate {
   arv: number;
   source: FlipArvSource;
-  /** Closed sale comps used for median (0 when manual ARV). */
+  /** Closed sales used in the tier slice for ARV. */
   compCount: number;
+  /** Physically similar closed sales before tier slice. */
+  similarCompCount: number | null;
+  /** Closed sales in radius before similarity filter. */
+  radiusCompCount: number;
+  /** Radius comps rejected as not similar enough to subject. */
+  rejectedCompCount: number;
+  /** Median $/sqft of tier-selected comps (comp_median_psf only). */
+  medianPricePerSqft: number | null;
   medianClosePrice: number | null;
   radiusMiles: number;
   maxAgeMonths: number | null;
+  /** How tier-selected comps were chosen (comp_median_psf only). */
+  sliceMethod: FlipArvSliceMethod | null;
+  sliceFraction: number | null;
+  sliceLabel: string | null;
+  /** True when a wider slice was used due to thin comp count. */
+  fallbackUsed: boolean;
+  warning: string | null;
+  /** Closed sales that drove ARV (comp_median_psf only). */
+  comps: FlipArvCompRecord[];
 }
 
 export interface FlipPredictionCosts {

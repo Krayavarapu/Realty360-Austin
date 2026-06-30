@@ -18,6 +18,9 @@ import type {
 } from "./types";
 
 const REQUEST_TIMEOUT_MS = 15_000;
+/** Retries after the first attempt (2 retries = 3 total tries). */
+const TCAD_MAX_RETRIES = 2;
+const TCAD_RETRY_BACKOFF_MS = [750, 2000] as const;
 /** Max rows when filtering by situs_num (multi-unit buildings can share a number). */
 const ADDRESS_CANDIDATE_LIMIT = 50;
 
@@ -61,22 +64,40 @@ function rankTcadAddressCandidates(
     .sort((a, b) => b.score - a.score);
 }
 
-async function queryTcadArcGisFeatures(
-  where: string,
-  recordCount = 1,
-  opts: { includeGeometry?: boolean } = {},
-): Promise<TcadArcGisFeature[]> {
-  const url = new URL(TCAD_ARCGIS_QUERY_URL);
-  url.searchParams.set("where", where);
-  url.searchParams.set("outFields", TCAD_PROPERTY_OUT_FIELDS);
-  const includeGeometry = opts.includeGeometry === true;
-  url.searchParams.set("returnGeometry", String(includeGeometry));
-  if (includeGeometry) {
-    url.searchParams.set("outSR", String(TCAD_ARCGIS_WGS84_SR));
-  }
-  url.searchParams.set("f", "json");
-  url.searchParams.set("resultRecordCount", String(recordCount));
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
+function isRetryableTcadError(err: unknown): boolean {
+  if (err instanceof TcadApiError) {
+    return err.statusCode === 504;
+  }
+  return err instanceof Error && err.name === "AbortError";
+}
+
+async function withTcadRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  const maxAttempts = 1 + TCAD_MAX_RETRIES;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const canRetry =
+        attempt < maxAttempts - 1 && isRetryableTcadError(err);
+      if (!canRetry) throw err;
+      await sleep(TCAD_RETRY_BACKOFF_MS[attempt] ?? 2000);
+    }
+  }
+
+  throw lastErr;
+}
+
+async function fetchTcadArcGisUrl(
+  url: URL,
+  timeoutMessage: string,
+): Promise<TcadArcGisQueryResponse> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -102,17 +123,39 @@ async function queryTcadArcGisFeatures(
       );
     }
 
-    return body.features ?? [];
+    return body;
   } catch (err) {
     if (err instanceof TcadApiError) throw err;
     if (err instanceof Error && err.name === "AbortError") {
-      throw new TcadApiError("TCAD ArcGIS request timed out", 504);
+      throw new TcadApiError(timeoutMessage, 504);
     }
     const message = err instanceof Error ? err.message : String(err);
     throw new TcadApiError(`TCAD ArcGIS request failed: ${message}`, 502);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function queryTcadArcGisFeatures(
+  where: string,
+  recordCount = 1,
+  opts: { includeGeometry?: boolean } = {},
+): Promise<TcadArcGisFeature[]> {
+  const url = new URL(TCAD_ARCGIS_QUERY_URL);
+  url.searchParams.set("where", where);
+  url.searchParams.set("outFields", TCAD_PROPERTY_OUT_FIELDS);
+  const includeGeometry = opts.includeGeometry === true;
+  url.searchParams.set("returnGeometry", String(includeGeometry));
+  if (includeGeometry) {
+    url.searchParams.set("outSR", String(TCAD_ARCGIS_WGS84_SR));
+  }
+  url.searchParams.set("f", "json");
+  url.searchParams.set("resultRecordCount", String(recordCount));
+
+  const body = await withTcadRetry(() =>
+    fetchTcadArcGisUrl(url, "TCAD ArcGIS request timed out"),
+  );
+  return body.features ?? [];
 }
 
 async function queryTcadArcGis(
@@ -342,34 +385,14 @@ export async function fetchTcadParcelsWithinRadius(opts: {
   url.searchParams.set("f", "json");
   url.searchParams.set("resultRecordCount", String(Math.min(limit * 3, 200)));
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const body = await withTcadRetry(() =>
+    fetchTcadArcGisUrl(url, "TCAD ArcGIS radius request timed out"),
+  );
 
-  try {
-    const res = await fetch(url.toString(), {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
+  const fetchedAt = new Date().toISOString();
+  const features = body.features ?? [];
 
-    if (!res.ok) {
-      throw new TcadApiError(
-        `TCAD ArcGIS radius request failed (${res.status})`,
-        502,
-      );
-    }
-
-    const body = (await res.json()) as TcadArcGisQueryResponse;
-    if (body.error?.message) {
-      throw new TcadApiError(
-        `TCAD ArcGIS error: ${body.error.message}`,
-        502,
-      );
-    }
-
-    const fetchedAt = new Date().toISOString();
-    const features = body.features ?? [];
-
-    return features
+  return features
       .map((feature) => {
         const attrs = feature.attributes;
         if (!attrs) return null;
@@ -393,14 +416,4 @@ export async function fetchTcadParcelsWithinRadius(opts: {
       .filter((row): row is TcadParcelWithDistance => row != null)
       .sort((a, b) => a.distanceMiles - b.distanceMiles)
       .slice(0, limit);
-  } catch (err) {
-    if (err instanceof TcadApiError) throw err;
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new TcadApiError("TCAD ArcGIS radius request timed out", 504);
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    throw new TcadApiError(`TCAD ArcGIS radius request failed: ${message}`, 502);
-  } finally {
-    clearTimeout(timeout);
-  }
 }
