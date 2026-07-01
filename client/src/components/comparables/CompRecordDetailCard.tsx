@@ -8,6 +8,8 @@ import {
   formatSoldDate,
 } from "@shared/comparables/format";
 import type { CompRecordDto } from "@shared/comparables/types";
+import { DataSourceCitation } from "@/components/DataSourceCitation";
+import { compRecordDataSource } from "@/lib/data-sources";
 
 interface CompRecordDetailCardProps {
   comp: CompRecordDto;
@@ -246,6 +248,8 @@ export function CompRecordDetailCard({
           {formatDistanceMiles(comp.distanceMiles)} from {subjectAddress}
         </span>
       </div>
+
+      <DataSourceCitation source={compRecordDataSource(comp)} className="pt-3" />
     </div>
   );
 }

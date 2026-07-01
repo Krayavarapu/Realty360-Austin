@@ -7,6 +7,7 @@ import {
   formatPrice,
 } from "@shared/comparables/format";
 import type { RadiusComparableDto } from "@shared/comparables/types";
+import { DataSourceCitation } from "@/components/DataSourceCitation";
 
 interface ComparableDetailCardProps {
   property: RadiusComparableDto;
@@ -165,6 +166,8 @@ export function ComparableDetailCard({
           {formatDistanceMiles(property.distanceMiles)} from {subjectAddress}
         </span>
       </div>
+
+      <DataSourceCitation source="mls" className="pt-3" />
     </div>
   );
 }

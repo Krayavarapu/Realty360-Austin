@@ -25,6 +25,7 @@ import { UnifiedComparablesResults } from "@/components/comparables/UnifiedCompa
 import { FlipPredictionResults } from "@/components/flip/FlipPredictionResults";
 import { FlipApiError, predictFlip } from "@/lib/api/flip";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   fetchAddressSuggestions,
   fetchUnifiedComparables,
@@ -60,6 +61,9 @@ export default function ComparablesLanding() {
   const [flipResult, setFlipResult] = useState<FlipPredictionResponse | null>(
     null,
   );
+  const [resultsTab, setResultsTab] = useState<"comparables" | "flip">(
+    "comparables",
+  );
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -83,6 +87,7 @@ export default function ComparablesLanding() {
 
     setFlipResult(null);
     setFlipError(null);
+    setResultsTab("comparables");
     setLoading(true);
     try {
       const { suggestions } = await fetchAddressSuggestions(trimmed, { limit: 10 });
@@ -284,110 +289,131 @@ export default function ComparablesLanding() {
         </form>
 
         {result && (
-          <div className="mt-10 space-y-10">
-            <UnifiedComparablesResults result={result} />
-
-            <section className="space-y-5">
-              <div>
-                <h2
-                  className="text-xl font-semibold"
-                  style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-                >
+          <div className="mt-10">
+            <Tabs
+              value={resultsTab}
+              onValueChange={(v) =>
+                setResultsTab(v as "comparables" | "flip")
+              }
+              className="gap-6"
+            >
+              <TabsList className="w-full max-w-md bg-secondary/50 border border-border h-10 p-1">
+                <TabsTrigger value="comparables" className="flex-1">
+                  Comparables
+                </TabsTrigger>
+                <TabsTrigger value="flip" className="flex-1">
                   Flip analysis
-                </h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Uses the same address, radius, and sale recency above. Enter
-                  your acquisition price and rehab scope to estimate ARV, costs,
-                  and margins.
-                </p>
-              </div>
+                </TabsTrigger>
+              </TabsList>
 
-              <form
-                onSubmit={handleFlipAnalysis}
-                className="blueprint-card p-6 space-y-5"
-              >
-                <div className="space-y-2">
-                  <Label htmlFor="purchase-price">Purchase price</Label>
-                  <Input
-                    id="purchase-price"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="350000"
-                    value={purchasePrice}
-                    onChange={(e) => setPurchasePrice(e.target.value)}
-                    className="font-mono text-sm max-w-[220px]"
-                    disabled={flipLoading}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Your offer or acquisition price — not pulled from MLS.
-                  </p>
-                </div>
+              <TabsContent value="comparables" className="mt-0">
+                <UnifiedComparablesResults result={result} />
+              </TabsContent>
 
-                <div className="space-y-2">
-                  <Label htmlFor="scope-tier">Rehab scope</Label>
-                  <Select
-                    value={scopeTier}
-                    onValueChange={(v) => setScopeTier(v as RehabScopeTier)}
-                    disabled={flipLoading}
+              <TabsContent value="flip" className="mt-0 space-y-5">
+                <div>
+                  <h2
+                    className="text-xl font-semibold"
+                    style={{ fontFamily: "'Space Grotesk', sans-serif" }}
                   >
-                    <SelectTrigger id="scope-tier" className="max-w-[320px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REHAB_SCOPE_TIERS.map((tier) => {
-                        const cfg =
-                          TRAVIS_COUNTY_FLIP_DEAL_CONFIG.rehabTiers[tier];
-                        return (
-                          <SelectItem key={tier} value={tier}>
-                            {cfg.label} — ${cfg.costPerSqft}/sqft
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {
-                      TRAVIS_COUNTY_FLIP_DEAL_CONFIG.rehabTiers[scopeTier]
-                        .shortDescription
-                    }
+                    Flip analysis
+                  </h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Uses the same address, radius, and sale recency above. Enter
+                    your acquisition price and rehab scope to estimate ARV,
+                    costs, and margins.
                   </p>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="sqft-override">
-                    Living area override (sqft, optional)
-                  </Label>
-                  <Input
-                    id="sqft-override"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="Leave blank to use TCAD / MLS"
-                    value={livingAreaSqftOverride}
-                    onChange={(e) => setLivingAreaSqftOverride(e.target.value)}
-                    className="font-mono text-sm max-w-[220px]"
-                    disabled={flipLoading}
-                  />
-                </div>
-
-                <Button
-                  type="submit"
-                  disabled={flipLoading}
-                  variant="outline"
-                  className="border-amber-400/50 text-amber-400 hover:bg-amber-400/10 hover:text-amber-300"
+                <form
+                  onSubmit={handleFlipAnalysis}
+                  className="blueprint-card p-6 space-y-5"
                 >
-                  <Calculator size={16} className="mr-2" />
-                  {flipLoading ? "Analyzing…" : "Run flip analysis"}
-                </Button>
+                  <div className="space-y-2">
+                    <Label htmlFor="purchase-price">Purchase price</Label>
+                    <Input
+                      id="purchase-price"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="350000"
+                      value={purchasePrice}
+                      onChange={(e) => setPurchasePrice(e.target.value)}
+                      className="font-mono text-sm max-w-[220px]"
+                      disabled={flipLoading}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Your offer or acquisition price — not pulled from MLS.
+                    </p>
+                  </div>
 
-                {flipError && (
-                  <p className="text-sm text-red-400 border border-red-400/30 bg-red-400/10 rounded px-3 py-2">
-                    {flipError}
-                  </p>
-                )}
-              </form>
+                  <div className="space-y-2">
+                    <Label htmlFor="scope-tier">Rehab scope</Label>
+                    <Select
+                      value={scopeTier}
+                      onValueChange={(v) => setScopeTier(v as RehabScopeTier)}
+                      disabled={flipLoading}
+                    >
+                      <SelectTrigger id="scope-tier" className="max-w-[320px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REHAB_SCOPE_TIERS.map((tier) => {
+                          const cfg =
+                            TRAVIS_COUNTY_FLIP_DEAL_CONFIG.rehabTiers[tier];
+                          return (
+                            <SelectItem key={tier} value={tier}>
+                              {cfg.label} — ${cfg.costPerSqft}/sqft
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {
+                        TRAVIS_COUNTY_FLIP_DEAL_CONFIG.rehabTiers[scopeTier]
+                          .shortDescription
+                      }
+                    </p>
+                  </div>
 
-              {flipResult && <FlipPredictionResults result={flipResult} />}
-            </section>
+                  <div className="space-y-2">
+                    <Label htmlFor="sqft-override">
+                      Living area override (sqft, optional)
+                    </Label>
+                    <Input
+                      id="sqft-override"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="Leave blank to use TCAD / MLS"
+                      value={livingAreaSqftOverride}
+                      onChange={(e) =>
+                        setLivingAreaSqftOverride(e.target.value)
+                      }
+                      className="font-mono text-sm max-w-[220px]"
+                      disabled={flipLoading}
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    disabled={flipLoading}
+                    variant="outline"
+                    className="border-amber-400/50 text-amber-400 hover:bg-amber-400/10 hover:text-amber-300"
+                  >
+                    <Calculator size={16} className="mr-2" />
+                    {flipLoading ? "Analyzing…" : "Run flip analysis"}
+                  </Button>
+
+                  {flipError && (
+                    <p className="text-sm text-red-400 border border-red-400/30 bg-red-400/10 rounded px-3 py-2">
+                      {flipError}
+                    </p>
+                  )}
+                </form>
+
+                {flipResult && <FlipPredictionResults result={flipResult} />}
+              </TabsContent>
+            </Tabs>
           </div>
         )}
       </div>
