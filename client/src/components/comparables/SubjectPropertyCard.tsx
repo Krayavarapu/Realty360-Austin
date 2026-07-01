@@ -9,6 +9,8 @@ import type {
   PropertyDetailDto,
   UnifiedComparablesResponse,
 } from "@shared/comparables/types";
+import { DataSourceCitation } from "@/components/DataSourceCitation";
+import { unifiedSubjectDataSource } from "@/lib/data-sources";
 
 interface SubjectPropertyCardProps {
   result: UnifiedComparablesResponse;
@@ -64,7 +66,7 @@ export function SubjectPropertyCard({ result }: SubjectPropertyCardProps) {
   const hasMlsDetails = subject != null;
 
   return (
-    <div className="blueprint-card p-5 text-sm space-y-4">
+    <div className="blueprint-card p-5 text-sm space-y-4 flex flex-col">
       <div>
         <div className="section-label mb-1">Subject property</div>
         <div
@@ -232,6 +234,8 @@ export function SubjectPropertyCard({ result }: SubjectPropertyCardProps) {
           )}
         </div>
       </div>
+
+      <DataSourceCitation source={unifiedSubjectDataSource(result)} />
     </div>
   );
 }

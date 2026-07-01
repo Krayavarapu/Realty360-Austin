@@ -6,6 +6,11 @@ import type {
   FlipViability,
 } from "@shared/flip/prediction-types";
 import { getRehabTierConfig } from "@shared/flip/config";
+import { DataSourceCitation } from "@/components/DataSourceCitation";
+import {
+  flipSubjectDataSource,
+  formatPropertyDataSource,
+} from "@/lib/data-sources";
 
 interface FlipPredictionResultsProps {
   result: FlipPredictionResponse;
@@ -65,24 +70,32 @@ function CostRow({
 
 function ArvCompRow({ comp }: { comp: FlipArvCompRecord }) {
   return (
-    <div className="flex items-start justify-between gap-3 py-2 border-b border-border/60 last:border-b-0 text-xs">
-      <div className="min-w-0">
-        <div
-          className="font-medium truncate"
-          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-        >
-          {comp.address}
+    <div className="py-2 border-b border-border/60 last:border-b-0 text-xs">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div
+            className="font-medium truncate"
+            style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+          >
+            {comp.address}
+          </div>
+          <div className="font-mono text-muted-foreground mt-0.5">
+            {comp.bedrooms}/{comp.bathrooms} bed/bath ·{" "}
+            {comp.livingAreaSqft.toLocaleString()} sqft ·{" "}
+            {comp.distanceMiles.toFixed(2)} mi
+          </div>
         </div>
-        <div className="font-mono text-muted-foreground mt-0.5">
-          {comp.bedrooms}/{comp.bathrooms} bed/bath ·{" "}
-          {comp.livingAreaSqft.toLocaleString()} sqft ·{" "}
-          {comp.distanceMiles.toFixed(2)} mi
+        <div className="text-right shrink-0 font-mono">
+          <div>{formatUsd(comp.closePrice)}</div>
+          <div className="text-muted-foreground">
+            {formatUsd(comp.pricePerSqft)}/sqft
+          </div>
         </div>
       </div>
-      <div className="text-right shrink-0 font-mono">
-        <div>{formatUsd(comp.closePrice)}</div>
-        <div className="text-muted-foreground">{formatUsd(comp.pricePerSqft)}/sqft</div>
-      </div>
+      <DataSourceCitation
+        source="mls-closed-sales"
+        className="pt-1.5 mt-1 border-t-0"
+      />
     </div>
   );
 }
@@ -97,6 +110,10 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
     arv.source === "manual_override"
       ? "Manual ARV override"
       : arv.sliceLabel ?? `Median $/sqft from ${arv.compCount} closed sale${arv.compCount === 1 ? "" : "s"}`;
+
+  const subjectSource = flipSubjectDataSource(subject);
+  const arvCitationSource =
+    arv.source === "manual_override" ? "manual-override" : "mls-closed-sales";
 
   return (
     <div className="space-y-6">
@@ -120,6 +137,10 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
             {" · "}
             {rehabTier.label} rehab
           </p>
+          <DataSourceCitation
+            source={subjectSource}
+            className="mt-2 pt-2 border-t border-border/40"
+          />
         </div>
         <span
           className={`border rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${viabilityStyle.className}`}
@@ -129,7 +150,7 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="blueprint-card p-4">
+        <div className="blueprint-card p-4 flex flex-col">
           <div className="section-label mb-1">ARV</div>
           <div
             className="text-2xl font-semibold text-amber-400"
@@ -143,9 +164,10 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
               {formatUsd(arv.medianPricePerSqft)}/sqft median
             </p>
           )}
+          <DataSourceCitation source={arvCitationSource} />
         </div>
 
-        <div className="blueprint-card p-4">
+        <div className="blueprint-card p-4 flex flex-col">
           <div className="section-label mb-1">Net profit</div>
           <div
             className={`text-2xl font-semibold ${margins.netProfit >= 0 ? "text-teal-400" : "text-red-400"}`}
@@ -156,9 +178,10 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
           <p className="text-[11px] font-mono text-muted-foreground mt-1">
             {formatPct(margins.netMarginPct)} net margin
           </p>
+          <DataSourceCitation source="deal-config" />
         </div>
 
-        <div className="blueprint-card p-4">
+        <div className="blueprint-card p-4 flex flex-col">
           <div className="section-label mb-1">Total project cost</div>
           <div
             className="text-2xl font-semibold"
@@ -169,6 +192,7 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
           <p className="text-[11px] text-muted-foreground mt-1">
             Net sale proceeds {formatUsd(costs.netSaleProceeds)}
           </p>
+          <DataSourceCitation source="deal-config" />
         </div>
       </div>
 
@@ -216,10 +240,11 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
               ` ${arv.rejectedCompCount} excluded as not similar enough.`}
             {arv.fallbackUsed && !arv.warning && " Wider comp slice used."}
           </p>
+          <DataSourceCitation source="mls-closed-sales" />
         </div>
       )}
 
-      <div className="blueprint-card p-4">
+      <div className="blueprint-card p-4 flex flex-col">
         <h3
           className="text-sm font-semibold mb-3"
           style={{ fontFamily: "'Space Grotesk', sans-serif" }}
@@ -244,9 +269,10 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
           sub={`Interest ${formatUsd(costs.financing.interestDuringHold)} · Points ${formatUsd(costs.financing.originationFee)}`}
         />
         <CostRow label="Sell-side closing" value={formatUsd(costs.sellClosing)} />
+        <DataSourceCitation source="deal-config" />
       </div>
 
-      <div className="blueprint-card p-4">
+      <div className="blueprint-card p-4 flex flex-col">
         <h3
           className="text-sm font-semibold mb-3"
           style={{ fontFamily: "'Space Grotesk', sans-serif" }}
@@ -272,7 +298,20 @@ export function FlipPredictionResults({ result }: FlipPredictionResultsProps) {
             sub={`Cash in deal ${formatUsd(margins.cashInvested)}`}
           />
         )}
+        <DataSourceCitation source="deal-config" />
       </div>
+
+      <p className="text-[11px] text-muted-foreground/90 font-mono border border-border/60 rounded px-3 py-2.5">
+        <span className="section-label text-[9px] block mb-1">Data sources</span>
+        Subject property: {formatPropertyDataSource(subjectSource)}
+        {" · "}
+        ARV:{" "}
+        {arv.source === "manual_override"
+          ? "Manual override"
+          : "MLS closed sales"}
+        {" · "}
+        Costs & returns: Travis County deal defaults (derived)
+      </p>
     </div>
   );
 }
