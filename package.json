@@ -12,6 +12,7 @@
     "check": "tsc --noEmit",
     "seed:mls": "tsx scripts/seed-mls.ts",
     "seed:mls:open": "tsx scripts/seed-mls-open.ts",
+    "smoke:flip": "tsx scripts/smoke-flip.ts",
     "format": "prettier --write ."
   },
   "dependencies": {
