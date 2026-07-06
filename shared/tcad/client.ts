@@ -5,8 +5,15 @@ import {
   normalizeTcadAddressInput,
   parseTcadAddressTokens,
   scoreTcadAddressMatch,
+  streetNameLikeToken,
 } from "./address-query";
 import { TCAD_ARCGIS_QUERY_URL, TCAD_ARCGIS_WGS84_SR, TCAD_PROPERTY_OUT_FIELDS } from "./constants";
+import {
+  findTcadParcelAddressCandidates,
+  findTcadParcelByPropId,
+  findTcadParcelsWithinRadius as findCachedTcadParcelsWithinRadius,
+  isTcadCacheConfigured,
+} from "./db";
 import { centroidFromEsriPolygon, type TcadParcelCentroid } from "./geometry";
 import { haversineMiles } from "../comparables/geo";
 import { toTcadPropertyDto } from "./transform";
@@ -185,13 +192,7 @@ async function toTcadPropertyDtoWithCentroid(
   return toTcadPropertyDto(attrs, fetchedAt, centroid);
 }
 
-/**
- * Query the Travis County TCAD ArcGIS layer for a single parcel by `PROP_ID`.
- *
- * Upstream endpoint:
- * {@link TCAD_ARCGIS_QUERY_URL}
- */
-export async function fetchTcadPropertyByPropId(
+async function fetchTcadPropertyByPropIdLive(
   propId: number,
 ): Promise<TcadPropertyDto | null> {
   const features = await queryTcadArcGisFeatures(`PROP_ID=${propId}`, 1, {
@@ -202,6 +203,26 @@ export async function fetchTcadPropertyByPropId(
   if (!attrs) return null;
   const centroid = centroidFromEsriPolygon(feature.geometry?.rings);
   return toTcadPropertyDto(attrs, new Date().toISOString(), centroid);
+}
+
+/**
+ * Parcel by `PROP_ID` — Postgres cache first, live ArcGIS fallback.
+ */
+export async function fetchTcadPropertyByPropId(
+  propId: number,
+): Promise<TcadPropertyDto | null> {
+  if (isTcadCacheConfigured()) {
+    try {
+      const cached = await findTcadParcelByPropId(propId);
+      if (cached) return cached;
+    } catch (err) {
+      console.warn(
+        "[tcad] cache propId lookup failed, falling back to ArcGIS:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return fetchTcadPropertyByPropIdLive(propId);
 }
 
 export interface TcadAddressLookupResult {
@@ -223,7 +244,7 @@ export interface TcadAddressLookupOutcome {
 }
 
 function isAmbiguousTcadRank(
-  ranked: Array<{ attrs: TcadArcGisAttributes; score: number }>,
+  ranked: Array<{ score: number }>,
 ): boolean {
   if (ranked.length <= 1) return false;
   const best = ranked[0]!.score;
@@ -231,33 +252,133 @@ function isAmbiguousTcadRank(
   return topTier.length > 1;
 }
 
-async function resolveTcadAddressLookup(
-  rawAddress: string,
-): Promise<TcadAddressLookupOutcome> {
-  const query = normalizeTcadAddressInput(rawAddress);
-  if (query.length < 3) {
+function emptyAddressOutcome(query: string): TcadAddressLookupOutcome {
+  return {
+    status: "none",
+    query,
+    property: null,
+    matchScore: null,
+    matchedSitusAddress: null,
+    candidates: [],
+  };
+}
+
+function outcomeFromRankedDtos(
+  query: string,
+  ranked: Array<{ dto: TcadPropertyDto; score: number }>,
+): TcadAddressLookupOutcome {
+  if (ranked.length === 0) return emptyAddressOutcome(query);
+
+  if (isAmbiguousTcadRank(ranked)) {
+    const topTier = ranked.filter((row) => row.score >= ranked[0]!.score - 3);
     return {
-      status: "none",
+      status: "ambiguous",
       query,
       property: null,
       matchScore: null,
       matchedSitusAddress: null,
-      candidates: [],
+      candidates: topTier.slice(0, 10).map((row) => row.dto),
     };
   }
 
+  const best = ranked[0]!;
+  return {
+    status: "single",
+    query,
+    property: best.dto,
+    matchScore: best.score,
+    matchedSitusAddress: best.dto.situsAddress ?? "",
+    candidates: [],
+  };
+}
+
+async function resolveTcadAddressLookupFromCache(
+  rawAddress: string,
+  query: string,
+): Promise<TcadAddressLookupOutcome | null> {
+  if (!isTcadCacheConfigured()) return null;
+
+  try {
+    const tokens = parseTcadAddressTokens(rawAddress);
+    if (tokens.searchTokens.length === 0) return emptyAddressOutcome(query);
+
+    const streetLike = streetNameLikeToken(tokens);
+    let candidates = await findTcadParcelAddressCandidates({
+      streetNumber: tokens.streetNumber,
+      streetLike,
+      zip: tokens.zip,
+      limit: ADDRESS_CANDIDATE_LIMIT,
+    });
+
+    let ranked = candidates
+      .map((dto) => ({
+        dto,
+        score: scoreTcadAddressMatch(rawAddress, dto.situsAddress, tokens.zip),
+      }))
+      .filter((row) => isAcceptableTcadAddressScore(row.score))
+      .sort((a, b) => b.score - a.score);
+
+    // Broader fallbacks mirror ArcGIS address-query fallbacks.
+    if (ranked.length === 0 && tokens.streetNumber) {
+      if (tokens.zip && streetLike) {
+        candidates = await findTcadParcelAddressCandidates({
+          streetNumber: tokens.streetNumber,
+          streetLike,
+          zip: null,
+          limit: ADDRESS_CANDIDATE_LIMIT,
+        });
+      } else if (tokens.zip) {
+        candidates = await findTcadParcelAddressCandidates({
+          streetNumber: tokens.streetNumber,
+          streetLike: null,
+          zip: null,
+          limit: ADDRESS_CANDIDATE_LIMIT,
+        });
+      } else {
+        candidates = [];
+      }
+      ranked = candidates
+        .map((dto) => ({
+          dto,
+          score: scoreTcadAddressMatch(rawAddress, dto.situsAddress, tokens.zip),
+        }))
+        .filter((row) => isAcceptableTcadAddressScore(row.score))
+        .sort((a, b) => b.score - a.score);
+    } else if (ranked.length === 0 && streetLike && tokens.zip) {
+      candidates = await findTcadParcelAddressCandidates({
+        streetNumber: null,
+        streetLike,
+        zip: null,
+        limit: ADDRESS_CANDIDATE_LIMIT,
+      });
+      ranked = candidates
+        .map((dto) => ({
+          dto,
+          score: scoreTcadAddressMatch(rawAddress, dto.situsAddress, tokens.zip),
+        }))
+        .filter((row) => isAcceptableTcadAddressScore(row.score))
+        .sort((a, b) => b.score - a.score);
+    }
+
+    // Cache miss → let caller fall back to live ArcGIS.
+    if (ranked.length === 0) return null;
+    return outcomeFromRankedDtos(query, ranked);
+  } catch (err) {
+    console.warn(
+      "[tcad] cache address lookup failed, falling back to ArcGIS:",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
+async function resolveTcadAddressLookupLive(
+  rawAddress: string,
+  query: string,
+): Promise<TcadAddressLookupOutcome> {
   const tokens = parseTcadAddressTokens(rawAddress);
   let where = buildTcadAddressWhereClause(tokens);
-  if (!where) {
-    return {
-      status: "none",
-      query,
-      property: null,
-      matchScore: null,
-      matchedSitusAddress: null,
-      candidates: [],
-    };
-  }
+  if (!where) return emptyAddressOutcome(query);
 
   let candidates = await queryTcadArcGis(where, ADDRESS_CANDIDATE_LIMIT);
   const fetchedAt = new Date().toISOString();
@@ -271,16 +392,7 @@ async function resolveTcadAddressLookup(
     }
   }
 
-  if (ranked.length === 0) {
-    return {
-      status: "none",
-      query,
-      property: null,
-      matchScore: null,
-      matchedSitusAddress: null,
-      candidates: [],
-    };
-  }
+  if (ranked.length === 0) return emptyAddressOutcome(query);
 
   if (isAmbiguousTcadRank(ranked)) {
     const topTier = ranked.filter((row) => row.score >= ranked[0]!.score - 3);
@@ -310,6 +422,18 @@ async function resolveTcadAddressLookup(
       best.attrs.situs_address ?? property.situsAddress ?? "",
     candidates: [],
   };
+}
+
+async function resolveTcadAddressLookup(
+  rawAddress: string,
+): Promise<TcadAddressLookupOutcome> {
+  const query = normalizeTcadAddressInput(rawAddress);
+  if (query.length < 3) return emptyAddressOutcome(query);
+
+  const cached = await resolveTcadAddressLookupFromCache(rawAddress, query);
+  if (cached) return cached;
+
+  return resolveTcadAddressLookupLive(rawAddress, query);
 }
 
 /**
@@ -346,11 +470,7 @@ export async function fetchTcadPropertyByAddress(
 
 export type TcadParcelWithDistance = TcadPropertyDto & { distanceMiles: number };
 
-/**
- * Parcels whose geometry intersects a buffer around a WGS-84 point.
- * Tax values are reference only — not sale comps.
- */
-export async function fetchTcadParcelsWithinRadius(opts: {
+async function fetchTcadParcelsWithinRadiusLive(opts: {
   latitude: number;
   longitude: number;
   radiusMiles: number;
@@ -416,4 +536,30 @@ export async function fetchTcadParcelsWithinRadius(opts: {
       .filter((row): row is TcadParcelWithDistance => row != null)
       .sort((a, b) => a.distanceMiles - b.distanceMiles)
       .slice(0, limit);
+}
+
+/**
+ * Parcels within a radius of a WGS-84 point.
+ * Tax values are reference only — not sale comps.
+ * Uses Postgres cache when available; live ArcGIS otherwise.
+ */
+export async function fetchTcadParcelsWithinRadius(opts: {
+  latitude: number;
+  longitude: number;
+  radiusMiles: number;
+  excludePropId?: number;
+  limit?: number;
+}): Promise<TcadParcelWithDistance[]> {
+  if (isTcadCacheConfigured()) {
+    try {
+      const cached = await findCachedTcadParcelsWithinRadius(opts);
+      if (cached.length > 0) return cached;
+    } catch (err) {
+      console.warn(
+        "[tcad] cache radius lookup failed, falling back to ArcGIS:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return fetchTcadParcelsWithinRadiusLive(opts);
 }

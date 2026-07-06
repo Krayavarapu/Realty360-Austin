@@ -7,6 +7,7 @@ import {
 import {
   fetchTcadAddressLookupOutcome,
   fetchTcadPropertyByPropId,
+  TcadApiError,
 } from "../tcad/client";
 import type { TcadPropertyDto } from "../tcad/types";
 import {
@@ -83,15 +84,13 @@ function tcadCandidatesFromDtos(
   return dtos.map((tcad) => tcadPropertyToTaxCandidate(tcad));
 }
 
-function mlsHasCoordinates(mls: PropertyDetailDto | null | undefined): boolean {
-  return mls?.latitude != null && mls?.longitude != null;
-}
-
 /**
  * Enrich a subject from TCAD and/or MLS SQLite.
  *
  * Linking priority: `propId` for TCAD when provided, else `address`.
  * MLS resolves by explicit `address`, or TCAD situs when only `propId` is given.
+ * TCAD is always attempted for tax values (assessed/appraised/market), even when
+ * MLS already supplies coordinates — location still prefers MLS in compose.
  * Multiple TCAD tax records surface in `taxCandidates` instead of silent null.
  */
 export async function fetchPropertyProfile(
@@ -134,17 +133,12 @@ export async function fetchPropertyProfile(
       ? buildTcadMatch("single")
       : buildTcadMatch("not_found", "No TCAD property found for that propId");
   } else if (address) {
-    if (mlsHasCoordinates(mls)) {
-      tcadMatch = buildTcadMatch(
-        "none",
-        "TCAD skipped — MLS listing has coordinates",
-      );
-    } else {
-      let tcadQuery = address;
-      if (mls?.postalCode && !address.includes(mls.postalCode)) {
-        tcadQuery = `${address} ${mls.postalCode}`;
-      }
+    let tcadQuery = address;
+    if (mls?.postalCode && !address.includes(mls.postalCode)) {
+      tcadQuery = `${address} ${mls.postalCode}`;
+    }
 
+    try {
       const outcome = await fetchTcadAddressLookupOutcome(tcadQuery);
       if (outcome.status === "single" && outcome.property) {
         tcad = outcome.property;
@@ -160,6 +154,16 @@ export async function fetchPropertyProfile(
           "not_found",
           "No TCAD property found for that address",
         );
+      }
+    } catch (err) {
+      // MLS alone is enough for profile/flip; don't fail the request on ArcGIS errors.
+      if (mls && err instanceof TcadApiError) {
+        tcadMatch = buildTcadMatch(
+          "not_found",
+          `TCAD lookup failed: ${err.message}`,
+        );
+      } else {
+        throw err;
       }
     }
   }

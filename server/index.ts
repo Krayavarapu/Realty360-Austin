@@ -3,12 +3,14 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import { loadEnvLocal } from "../scripts/load-env-local";
 import { createApp } from "./app";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
+  loadEnvLocal();
   const app = createApp();
   const server = createServer(app);
 

@@ -74,7 +74,7 @@ function pickSmokeSubject(): PropertyRow {
          ORDER BY close_date DESC
          LIMIT 50`,
       )
-      .all({ min_close_date: minCloseDate }) as PropertyRow[];
+      .all({ min_close_date: minCloseDate }) as unknown as PropertyRow[];
 
     for (const row of candidates) {
       const resolved = resolvePropertyByAddress(db, row.address_line);

@@ -45,6 +45,7 @@ export interface TcadPropertyDto {
   tcadAcres: number | null;
   gisAcres: number | null;
   deedDate: string | null;
-  source: "tcad-arcgis";
+  /** `tcad-cache` when served from Postgres; `tcad-arcgis` for live ArcGIS. */
+  source: "tcad-cache" | "tcad-arcgis";
   fetchedAt: string;
 }
