@@ -25,7 +25,11 @@ export function unifiedSubjectDataSource(
   result: UnifiedComparablesResponse,
 ): PropertyDataSource {
   const hasMls = result.subject != null;
-  const hasTcad = result.subjectTcad != null;
+  const profile = result.subjectProfile;
+  const hasTcad =
+    result.subjectTcad != null ||
+    profile?.tax != null ||
+    (profile?.taxCandidates?.length ?? 0) > 0;
   if (hasMls && hasTcad) return "both";
   if (hasTcad) return "tcad";
   return "mls";

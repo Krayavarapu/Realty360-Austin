@@ -28,7 +28,7 @@ const STREET_SUFFIXES = new Set([
   "WAY",
 ]);
 
-/** City / state tokens to exclude from street-name ArcGIS LIKE filters. */
+/** City / state tokens to exclude from street-name ArcGIS LIKE filters and match scoring. */
 const CITY_TOKENS = new Set([
   "AUSTIN",
   "TX",
@@ -100,6 +100,31 @@ export function parseTcadAddressTokens(raw: string): TcadAddressTokens {
   });
 
   return { streetNumber, zip, searchTokens };
+}
+
+function isAdministrativeToken(token: string): boolean {
+  return CITY_TOKENS.has(token.toUpperCase());
+}
+
+/** Street tokens for scoring — drops city/state so MLS-style queries match TCAD situs. */
+function streetScoringTokens(queryRaw: string): string[] {
+  const parsed = parseTcadAddressTokens(queryRaw);
+  return parsed.searchTokens
+    .filter((t) => !isAdministrativeToken(t))
+    .flatMap((t) => {
+      const expanded = expandLikeTokens(t);
+      return expanded.length > 0 ? expanded : [compactTcadAddress(t)];
+    })
+    .filter(Boolean);
+}
+
+/** Compact street core without zip, city, or state (for MLS vs situs comparison). */
+function compactStreetCore(raw: string): string {
+  const parsed = parseTcadAddressTokens(raw);
+  return parsed.searchTokens
+    .filter((t) => !isAdministrativeToken(t))
+    .map((t) => compactTcadAddress(t))
+    .join("");
 }
 
 export function escapeArcGisLiteral(value: string): string {
@@ -244,21 +269,18 @@ export function scoreTcadAddressMatch(
 ): number {
   if (!situsAddress) return 0;
 
-  const queryCompact = compactTcadAddress(queryRaw);
-  const situsCompact = compactTcadAddress(situsAddress);
-  if (!queryCompact || !situsCompact) return 0;
+  const queryStreet = compactStreetCore(queryRaw);
+  const situsStreet = compactStreetCore(situsAddress);
+  if (!queryStreet || !situsStreet) return 0;
 
-  let queryCore = queryCompact;
-  if (zip) queryCore = queryCore.replace(zip, "");
-
-  if (situsCompact.includes(queryCore) || queryCore.includes(situsCompact)) {
+  if (
+    situsStreet.includes(queryStreet) ||
+    queryStreet.includes(situsStreet)
+  ) {
     return 100;
   }
 
-  const tokens = parseTcadAddressTokens(queryRaw).searchTokens.flatMap((t) => {
-    const expanded = expandLikeTokens(t);
-    return expanded.length > 0 ? expanded : [compactTcadAddress(t)];
-  });
+  const tokens = streetScoringTokens(queryRaw);
   if (tokens.length === 0) return 0;
 
   let matched = 0;
@@ -266,7 +288,7 @@ export function scoreTcadAddressMatch(
     if (!token) continue;
     if (/^\d+$/.test(token)) {
       if (situsContainsSpacedToken(situsAddress, token)) matched++;
-    } else if (situsCompact.includes(compactTcadAddress(token))) {
+    } else if (compactTcadAddress(situsAddress).includes(compactTcadAddress(token))) {
       matched++;
     }
   }

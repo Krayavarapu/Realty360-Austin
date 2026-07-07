@@ -304,6 +304,51 @@ export async function findTcadParcelAddressCandidates(opts: {
   return result.rows.map(parcelRowToDto);
 }
 
+/**
+ * All geolocated parcels in a radius bbox (for batch comp enrichment).
+ * Haversine filter applied in memory; capped to avoid runaway result sets.
+ */
+export async function findTcadParcelsInRadiusBBox(opts: {
+  latitude: number;
+  longitude: number;
+  radiusMiles: number;
+  maxRows?: number;
+}): Promise<TcadPropertyDto[]> {
+  if (!isTcadCacheConfigured()) return [];
+  await ensureTcadSchema();
+
+  const { latitude, longitude, radiusMiles, maxRows = 15_000 } = opts;
+
+  const latDelta = radiusMiles / 69;
+  const lonDelta = radiusMiles / (69 * Math.cos((latitude * Math.PI) / 180));
+
+  const result = await getTcadPool().query<TcadParcelRow>(
+    `SELECT * FROM tcad_parcels
+     WHERE latitude IS NOT NULL
+       AND longitude IS NOT NULL
+       AND latitude BETWEEN $1 AND $2
+       AND longitude BETWEEN $3 AND $4
+     LIMIT $5`,
+    [
+      latitude - latDelta,
+      latitude + latDelta,
+      longitude - lonDelta,
+      longitude + lonDelta,
+      maxRows,
+    ],
+  );
+
+  return result.rows
+    .map((row) => parcelRowToDto(row))
+    .filter((dto) => {
+      if (dto.latitude == null || dto.longitude == null) return false;
+      return (
+        haversineMiles(latitude, longitude, dto.latitude, dto.longitude) <=
+        radiusMiles
+      );
+    });
+}
+
 export async function findTcadParcelsWithinRadius(opts: {
   latitude: number;
   longitude: number;

@@ -1,4 +1,6 @@
 /** Full property fields for detail cards and API responses. */
+import type { PropertyProfileDto } from "../property-profile/types";
+
 export interface PropertyDetailDto {
   listingKey: string;
   listingId: string;
@@ -114,6 +116,8 @@ export interface UnifiedComparablesResponse {
     latitude: number | null;
     longitude: number | null;
   } | null;
+  /** Cached MLS + TCAD profile for flip analysis and other downstream use. */
+  subjectProfile: PropertyProfileDto;
   sections: {
     closedSales: UnifiedCompSection;
     openListings: UnifiedCompSection;

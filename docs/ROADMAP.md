@@ -2,7 +2,7 @@
 
 Living document for project phases, implementation status, and key decisions. Update this file as work completes so new agent sessions can pick up without chat history.
 
-**Last updated:** June 2026
+**Last updated:** July 7, 2026
 
 ---
 
@@ -10,7 +10,10 @@ Living document for project phases, implementation status, and key decisions. Up
 
 - **MLS and TCAD are separate data sources** — no forced `PROP_ID` ↔ `listing_id` linking in v1.
 - **SQLite (`data/mls.sqlite`)** — local MLS closed-residential cache; seed once, not on every build.
-- **TCAD** — live ArcGIS lookup via Express; not stored in MLS DB.
+- **TCAD** — Neon Postgres cache (`tcad_parcels`, ~373k parcels via `pnpm seed:tcad`); cache-first reads with live ArcGIS fallback.
+- **MLS sale/listing comps** — enriched with TCAD tax fields (`taxValue`, `tcadAcres`) at search time; optional `tax_reference` section unchanged.
+- **Property profile cache** — in-process TTL cache (30 min); comparables search warms profile for flip reuse.
+- **Multi-parcel TCAD** — ambiguous situs → `taxCandidates[]`; hold tax **Policy B** sums assessed values across all candidates; MLS-only profile when TCAD `not_found`.
 - **Flip prediction engine** — rules-based MVP first; Python/ML later behind the same API contract.
 
 ---
@@ -54,6 +57,10 @@ Living document for project phases, implementation status, and key decisions. Up
 | 2.3 Composed `PropertyProfileDto` | ✅ Complete | `shared/property-profile/` — identifiers, physical, tax, MLS sale, location, completeness, provenance; `composePropertyProfile()` |
 | 2.4 Linking strategy (documented) | ✅ Complete | Priority: user `propId` → user `address` → optional crosswalk later; partial profiles OK |
 | 2.5 `GET /api/property/profile` | ✅ Complete | TCAD + MLS enrichment; `taxCandidates` when multiple TCAD parcels; `tcadMatch` status |
+| 2.6 TCAD address match — MLS-style queries | ✅ Complete | `scoreTcadAddressMatch` strips city/state tokens so `504 Bramble Dr, Austin, TX 78745` resolves to situs |
+| 2.7 Profile cache (in-process) | ✅ Complete | `shared/property-profile/profile-cache.ts` — keyed by address and/or `propId`; 30 min TTL |
+| 2.8 Multi-parcel hold tax — Policy B | ✅ Complete | `taxHoldBasisFromProfile()` in `shared/property-profile/tcad-tax.ts` — sum assessed across `taxCandidates`; no purchase-price fallback when candidates exist |
+| 2.9 MLS-only fallback | ✅ Complete | When TCAD `not_found`, profile composes from MLS; comparables + flip continue without tax fields |
 
 ---
 
@@ -62,10 +69,14 @@ Living document for project phases, implementation status, and key decisions. Up
 | Step | Status | Description |
 |------|--------|-------------|
 | 3.1 MLS active / pending pipeline | ✅ Complete | `pnpm seed:mls:open` — Active/Pending into same `properties` table; `findActiveListingsWithinRadius` |
-| 3.2 `CompRecordDto` | ✅ Complete | `shared/comparables/comp-record.ts` — `source`, `compRole` (`sale_comp` \| `listing_comp` \| `tax_reference`) |
+| 3.2 `CompRecordDto` | ✅ Complete | `shared/comparables/comp-record.ts` — `source`, `compRole` (`sale_comp` \| `listing_comp` \| `tax_reference`); `taxValue`, `tcadAcres` |
 | 3.3 Unified comparables API | ✅ Complete | `GET /api/comparables/unified` — MLS closed + MLS open + optional TCAD (`includeTcad=true`) |
 | 3.4 UI — separate comp sections | ✅ Complete | `UnifiedComparablesResults` — closed / active / tax sections via unified API |
 | 3.5 Do not use TCAD appraised value as sale comps | ✅ Complete | Design decision — tax values are reference only |
+| 3.6 MLS comps enriched with TCAD tax data | ✅ Complete | `shared/comparables/tcad-enrichment.ts` — one radius prefetch per search, in-memory address/coord match; `CompRecordDetailCard` shows tax value + TCAD acres; citation `MLS + TCAD` |
+| 3.7 Profile-first subject resolution | ✅ Complete | `unified-search.ts` resolves subject via `fetchPropertyProfileCached`; response includes `subjectProfile` |
+| 3.8 Optional `propId` on unified API | ✅ Complete | `GET /api/comparables/unified?propId=` disambiguates TCAD parcel; UI parcel picker on subject card |
+| 3.9 Subject card — TCAD tax fields | ✅ Complete | `SubjectPropertyCard` — tax value, TCAD acres, deed date; multi-parcel list + combined tax when `taxCandidates` |
 
 ---
 
@@ -77,6 +88,8 @@ Living document for project phases, implementation status, and key decisions. Up
 | 4.2 `FlipPredictionRequest` / `FlipPredictionResponse` schema | ✅ Complete | `shared/flip/prediction-types.ts`, `prediction-schema.ts` (Zod + enriched/manual modes) |
 | 4.3 `POST /predict/flip` — rules engine v0 | ✅ Complete | `shared/flip/predict-flip.ts`, `POST /api/predict/flip` — comp median ARV + margin math |
 | 4.4 Stack decision | ✅ Complete | Python for modeling later; TypeScript/Express for app; optional FastAPI microservice |
+| 4.5 Flip UI on comparables landing | ✅ Complete | `ComparablesLanding` flip tab → `FlipPredictionResults`; hold uses Policy B (sum `taxCandidates`) or single assessed → appraised → purchase when no TCAD |
+| 4.6 Flip smoke tests | ✅ Complete | `pnpm smoke:flip` — direct engine + optional HTTP E2E |
 
 ---
 
@@ -84,10 +97,12 @@ Living document for project phases, implementation status, and key decisions. Up
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 5.1 Neon / Postgres for MLS or TCAD cache | ⬜ To do | Seed remote DB once; not per build |
-| 5.2 Batch TCAD ETL | ⬜ To do | Pagination into DB if live ArcGIS is too slow |
-| 5.3 Deal ledger / training labels | ⬜ To do | Actual purchase, rehab spend, sold price, hold time |
-| 5.4 Python ML model | ⬜ To do | Same request/response contract as rules engine |
+| 5.1 Neon / Postgres for TCAD cache | ✅ Complete | `DATABASE_URL` in `.env.local`; `shared/tcad/db.ts`; ~373k parcels in `tcad_parcels` |
+| 5.2 Batch TCAD ETL | ✅ Complete | `pnpm seed:tcad` — paginated ArcGIS ETL; `pnpm seed:tcad -- --fresh` to truncate/reload |
+| 5.3 MLS → TCAD crosswalk | ⬜ To do | Precomputed `listing_key` ↔ `prop_id` links (optional optimization) |
+| 5.4 Deal ledger / training labels | ⬜ To do | Actual purchase, rehab spend, sold price, hold time |
+| 5.5 Python ML model | ⬜ To do | Same request/response contract as rules engine |
+| 5.6 Monthly TCAD refresh | ⬜ To do | Cron re-run `seed:tcad` |
 
 ---
 
@@ -102,10 +117,16 @@ curl -G "http://localhost:3001/api/properties/by-radius" \
   --data-urlencode "maxAgeMonths=12"
 
 curl -G "http://localhost:3001/api/comparables/unified" \
-  --data-urlencode "address=507 Hammack Dr Austin" \
+  --data-urlencode "address=1613 W Braker Ln Austin" \
   --data-urlencode "radiusMiles=2" \
   --data-urlencode "maxAgeMonths=12" \
   --data-urlencode "includeTcad=true"
+
+# Disambiguate multi-parcel TCAD (optional propId)
+curl -G "http://localhost:3001/api/comparables/unified" \
+  --data-urlencode "address=1613 W Braker Ln Austin" \
+  --data-urlencode "propId=502434" \
+  --data-urlencode "radiusMiles=2"
 ```
 
 Related: `/api/properties/suggest`, `/api/properties/by-address`
@@ -120,10 +141,13 @@ curl -G "http://localhost:3001/api/property/profile" \
   --data-urlencode "address=507 Hammack Dr Austin"
 ```
 
-### TCAD (ArcGIS proxy)
+### TCAD (cache-first; ArcGIS fallback)
 
 ```bash
 curl "http://localhost:3001/api/tcad/property?propId=984219"
+
+curl -G "http://localhost:3001/api/tcad/property/by-address" \
+  --data-urlencode "address=504 Bramble Dr, Austin, TX 78745"
 ```
 
 ### Flip prediction (rules engine v0)
@@ -154,17 +178,38 @@ https://gis.traviscountytx.gov/server1/rest/services/Boundaries_and_Jurisdiction
 pnpm install
 pnpm seed:mls          # after .env.local; refreshes closed sales in data/mls.sqlite
 pnpm seed:mls:open     # active/pending open listings (same DB)
-pnpm dev:api           # Express API :3001
+pnpm seed:tcad         # full Travis County → Neon tcad_parcels (requires DATABASE_URL)
+pnpm dev:api           # Express API :3001 (loads .env.local for DATABASE_URL)
 pnpm dev               # Vite UI :3000 (proxies /api)
+pnpm smoke:flip        # flip engine + API regression checks
+pnpm docs:architecture-pdf  # regenerate docs/ARCHITECTURE_REPORT.pdf
 pnpm build && pnpm start   # production-style :3000
 ```
+
+**`.env.local`:** `VITE_MLS_GRID_TOKEN` (MLS seed) and `DATABASE_URL` (Neon TCAD cache). Confirm the Neon **endpoint** in `DATABASE_URL` matches the project you view in the dashboard (`ep-…` hostname).
+
+---
+
+## MLS ↔ TCAD match statistics (July 2026 audit)
+
+Crosswalk of **6,139** distinct MLS addresses against `tcad_parcels` (app scoring logic):
+
+| Outcome | Count |
+|---------|------:|
+| Single TCAD parcel | 1,573 |
+| No TCAD match (MLS-only fallback) | 4,539 |
+| Multiple TCAD parcels (`taxCandidates`) | 27 |
+
+**Test addresses:** single match — `504 Bramble Dr, Austin, TX 78745`; multi-parcel — `1613 W Braker Ln #B, Austin, TX 78758` (2 TCAD parcels, same situs). **507 Hammack Dr** has MLS data but no TCAD situs (numbering gap 505→600 on Hammack in TCAD).
 
 ---
 
 ## Suggested next work (in order)
 
-1. **Phase 5.1** — Neon / Postgres for MLS cache + scheduled open-listing refresh
-2. **Flip UI** — wire `POST /api/predict/flip` into calculator or comparables flow
+1. **Phase 5.3** — MLS → TCAD crosswalk (`listing_key` ↔ `prop_id`) for faster, more accurate comp tax joins
+2. **Phase 5.6** — Scheduled TCAD refresh (monthly `seed:tcad`)
+3. **Phase 5.4 / 5.5** — Deal ledger + Python ML behind same flip API contract
+4. **Coordinate-based TCAD fallback** — when address lookup `not_found` but MLS lat/lon exists, match nearest parcel(s) within small radius
 
 ---
 
@@ -174,13 +219,15 @@ pnpm build && pnpm start   # production-style :3000
 |------|--------|
 | Mile buckets | `shared/comparables/match-score.ts` |
 | Comp recency | `shared/comparables/recency.ts`, `scripts/mls-db.ts`, `server/routes/properties.ts` |
-| Unified comps | `shared/comparables/comp-record.ts`, `shared/comparables/unified-search.ts`, `server/routes/comparables.ts` |
-| Flip deal config | `shared/flip/types.ts`, `shared/flip/config.ts`, `shared/flip/deal-costs.ts`, `shared/flip/prediction-types.ts`, `shared/flip/prediction-schema.ts`, `shared/flip/predict-flip.ts`, `server/routes/predict.ts` |
+| Unified comps | `shared/comparables/comp-record.ts`, `shared/comparables/unified-search.ts`, `shared/comparables/tcad-enrichment.ts`, `server/routes/comparables.ts` |
+| Flip deal config | `shared/flip/types.ts`, `shared/flip/config.ts`, `shared/flip/deal-costs.ts`, `shared/flip/prediction-types.ts`, `shared/flip/prediction-schema.ts`, `shared/flip/predict-flip.ts`, `server/routes/predict.ts`, `scripts/smoke-flip.ts` |
+| TCAD cache / ETL | `shared/tcad/db.ts`, `scripts/seed-tcad.ts`, `scripts/load-env-local.ts` |
 | MLS schema / seed | `shared/mls/transform.ts`, `shared/mls/condition.ts`, `scripts/mls-db.ts`, `shared/mls/constants.ts`, `scripts/seed-mls-open.ts` |
 | API DTOs | `shared/comparables/types.ts`, `shared/comparables/property-dto.ts`, `shared/comparables/format.ts` |
-| Property profile | `shared/property-profile/types.ts`, `shared/property-profile/compose.ts`, `shared/property-profile/fetch-profile.ts`, `server/routes/property-profile.ts` |
+| Property profile | `shared/property-profile/types.ts`, `shared/property-profile/compose.ts`, `shared/property-profile/fetch-profile.ts`, `shared/property-profile/profile-cache.ts`, `shared/property-profile/tcad-tax.ts`, `server/routes/property-profile.ts` |
 | TCAD | `shared/tcad/*`, `server/routes/tcad.ts`, `server/app.ts` |
 | TCAD centroids | `shared/tcad/geometry.ts` |
-| Comparables UI | `client/src/components/comparables/ComparableDetailCard.tsx`, `CompRecordDetailCard.tsx`, `UnifiedComparablesResults.tsx` |
+| Comparables UI | `client/src/components/comparables/SubjectPropertyCard.tsx`, `CompRecordDetailCard.tsx`, `UnifiedComparablesResults.tsx`, `ComparablesLanding.tsx` (flip tab + parcel picker) |
+| Flip UI | `client/src/components/flip/FlipPredictionResults.tsx`, `client/src/lib/api/flip.ts` |
 
 See also: `LOCAL_DEVELOPMENT.md` for environment and troubleshooting.

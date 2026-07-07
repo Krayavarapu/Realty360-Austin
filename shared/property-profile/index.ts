@@ -7,6 +7,10 @@ export {
   PropertyProfileMlsAmbiguousError,
   PropertyProfileNotFoundError,
 } from "./fetch-profile";
+export {
+  clearPropertyProfileCache,
+  fetchPropertyProfileCached,
+} from "./profile-cache";
 export type { FetchPropertyProfileInput } from "./fetch-profile";
 export type {
   ComposePropertyProfileInput,

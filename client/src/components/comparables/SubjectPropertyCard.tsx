@@ -1,19 +1,28 @@
-import { Car, Clock, Droplets, Trees } from "lucide-react";
+import { Clock, Car, Droplets, Trees } from "lucide-react";
 import {
   formatGarageSpaces,
   formatLotAcres,
   formatOptionalYesNo,
   formatPrice,
+  formatSoldDate,
 } from "@shared/comparables/format";
 import type {
   PropertyDetailDto,
   UnifiedComparablesResponse,
 } from "@shared/comparables/types";
+import type { PropertyProfileTaxCandidate } from "@shared/property-profile/types";
+import {
+  pickProfileTaxValue,
+  sumDisplayTaxValueFromCandidates,
+} from "@shared/property-profile/tcad-tax";
 import { DataSourceCitation } from "@/components/DataSourceCitation";
 import { unifiedSubjectDataSource } from "@/lib/data-sources";
+import { Button } from "@/components/ui/button";
 
 interface SubjectPropertyCardProps {
   result: UnifiedComparablesResponse;
+  selectedPropId?: number | null;
+  onSelectPropId?: (propId: number | null) => void;
 }
 
 function conditionBadgeClass(condition: string | null): string {
@@ -53,7 +62,163 @@ function isOpenListing(subject: PropertyDetailDto): boolean {
   return subject.listPrice != null && subject.closeDate == null;
 }
 
-export function SubjectPropertyCard({ result }: SubjectPropertyCardProps) {
+function TaxCandidateRow({
+  candidate,
+  selected,
+  onSelect,
+}: {
+  candidate: PropertyProfileTaxCandidate;
+  selected: boolean;
+  onSelect?: (propId: number) => void;
+}) {
+  const taxValue = pickProfileTaxValue(candidate.tax);
+  const acres = candidate.tax.tcadAcres ?? candidate.tax.gisAcres;
+
+  return (
+    <div
+      className={`rounded border px-3 py-2 space-y-1.5 text-xs ${
+        selected
+          ? "border-amber-400/50 bg-amber-400/5"
+          : "border-border/80 bg-secondary/40"
+      }`}
+    >
+      <div className="font-medium text-sm leading-tight">
+        {candidate.situsAddress ?? `PROP_ID ${candidate.propId}`}
+      </div>
+      <div className="font-mono text-muted-foreground">
+        TCAD PROP_ID: {candidate.propId}
+      </div>
+      {taxValue != null && (
+        <div className="flex items-center justify-between">
+          <span className="section-label">Tax Value</span>
+          <span className="font-mono font-medium">{formatPrice(taxValue)}</span>
+        </div>
+      )}
+      <div className="flex items-center justify-between">
+        <span className="section-label">TCAD Acres</span>
+        <span className="font-mono">{formatLotAcres(acres)}</span>
+      </div>
+      {onSelect && (
+        <Button
+          type="button"
+          size="sm"
+          variant={selected ? "secondary" : "outline"}
+          className="w-full h-7 text-xs mt-1"
+          onClick={() => onSelect(candidate.propId)}
+        >
+          {selected ? "Selected parcel" : "Use this parcel"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function SubjectTaxSection({
+  result,
+  selectedPropId,
+  onSelectPropId,
+}: SubjectPropertyCardProps) {
+  const profile = result.subjectProfile;
+  if (!profile) return null;
+
+  const { tax, taxCandidates, tcadMatch } = profile;
+  const hasTax = tax != null || (taxCandidates?.length ?? 0) > 0;
+  if (!hasTax) return null;
+
+  const isAmbiguous = tcadMatch.status === "ambiguous" && taxCandidates?.length;
+
+  if (isAmbiguous) {
+    const combinedTax = sumDisplayTaxValueFromCandidates(taxCandidates);
+    const combinedAcres = taxCandidates.reduce((sum, c) => {
+      const acres = c.tax.tcadAcres ?? c.tax.gisAcres;
+      return acres != null ? sum + acres : sum;
+    }, 0);
+
+    return (
+      <div className="border-t border-border pt-3 space-y-2">
+        <div className="text-xs text-muted-foreground border border-amber-400/30 bg-amber-400/5 rounded px-3 py-2">
+          {tcadMatch.message ??
+            "Multiple TCAD tax records match this address. Hold-cost tax uses the combined assessed value (Policy B)."}
+        </div>
+        {combinedTax != null && (
+          <div className="flex items-center justify-between text-xs bg-secondary/50 rounded px-3 py-2">
+            <span className="section-label">Combined Tax Value</span>
+            <span className="font-mono font-medium">
+              {formatPrice(combinedTax)}
+            </span>
+          </div>
+        )}
+        {combinedAcres > 0 && (
+          <div className="flex items-center justify-between text-xs bg-secondary/50 rounded px-3 py-2">
+            <span className="section-label">Combined TCAD Acres</span>
+            <span className="font-mono">{formatLotAcres(combinedAcres)}</span>
+          </div>
+        )}
+        <div className="space-y-2">
+          <div className="section-label text-[10px]">TCAD parcels</div>
+          {taxCandidates.map((candidate) => (
+            <TaxCandidateRow
+              key={candidate.propId}
+              candidate={candidate}
+              selected={selectedPropId === candidate.propId}
+              onSelect={onSelectPropId}
+            />
+          ))}
+        </div>
+        {onSelectPropId && selectedPropId != null && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-muted-foreground"
+            onClick={() => onSelectPropId(null)}
+          >
+            Clear parcel selection
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (!tax) return null;
+
+  const taxValue = pickProfileTaxValue(tax);
+  const acres = tax.tcadAcres ?? tax.gisAcres ?? profile.physical.lotSizeAcres;
+  const propId =
+    result.subjectTcad?.propId ?? profile.identifiers.propId ?? null;
+
+  return (
+    <div className="border-t border-border pt-3 space-y-2">
+      {propId != null && (
+        <div className="text-xs font-mono text-muted-foreground">
+          TCAD PROP_ID: {propId}
+        </div>
+      )}
+      {taxValue != null && (
+        <div className="flex items-center justify-between text-xs bg-secondary/50 rounded px-3 py-2">
+          <span className="section-label">Tax Value</span>
+          <span className="font-mono font-medium">{formatPrice(taxValue)}</span>
+        </div>
+      )}
+      <div className="flex items-center justify-between text-xs bg-secondary/50 rounded px-3 py-2">
+        <span className="section-label">TCAD Acres</span>
+        <span className="font-mono">{formatLotAcres(acres)}</span>
+      </div>
+      {tax.deedDate && (
+        <div className="text-xs text-muted-foreground">
+          <Clock size={10} className="inline mr-1 text-amber-400/60" />
+          Deed date {formatSoldDate(tax.deedDate)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SubjectPropertyCard({
+  result,
+  selectedPropId,
+  onSelectPropId,
+}: SubjectPropertyCardProps) {
   const subject = result.subject;
   const subjectLabel =
     subject?.address ??
@@ -64,6 +229,9 @@ export function SubjectPropertyCard({ result }: SubjectPropertyCardProps) {
   const subjectBaths = subject?.bathrooms ?? result.filters.minBathrooms;
 
   const hasMlsDetails = subject != null;
+  const showPropIdHeader =
+    result.subjectTcad?.propId != null &&
+    result.subjectProfile?.tcadMatch.status !== "ambiguous";
 
   return (
     <div className="blueprint-card p-5 text-sm space-y-4 flex flex-col">
@@ -75,9 +243,9 @@ export function SubjectPropertyCard({ result }: SubjectPropertyCardProps) {
         >
           {subjectLabel}
         </div>
-        {result.subjectTcad?.propId != null && (
+        {showPropIdHeader && (
           <div className="text-xs font-mono text-muted-foreground mt-1">
-            TCAD PROP_ID: {result.subjectTcad.propId}
+            TCAD PROP_ID: {result.subjectTcad!.propId}
           </div>
         )}
       </div>
@@ -207,6 +375,12 @@ export function SubjectPropertyCard({ result }: SubjectPropertyCardProps) {
           limited. Comparables search still uses TCAD coordinates.
         </p>
       )}
+
+      <SubjectTaxSection
+        result={result}
+        selectedPropId={selectedPropId}
+        onSelectPropId={onSelectPropId}
+      />
 
       <div className="border-t border-border pt-3 space-y-2">
         <div className="text-xs text-muted-foreground font-mono">

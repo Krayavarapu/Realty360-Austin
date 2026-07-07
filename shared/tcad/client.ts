@@ -11,6 +11,7 @@ import { TCAD_ARCGIS_QUERY_URL, TCAD_ARCGIS_WGS84_SR, TCAD_PROPERTY_OUT_FIELDS }
 import {
   findTcadParcelAddressCandidates,
   findTcadParcelByPropId,
+  findTcadParcelsInRadiusBBox,
   findTcadParcelsWithinRadius as findCachedTcadParcelsWithinRadius,
   isTcadCacheConfigured,
 } from "./db";
@@ -562,4 +563,31 @@ export async function fetchTcadParcelsWithinRadius(opts: {
     }
   }
   return fetchTcadParcelsWithinRadiusLive(opts);
+}
+
+/**
+ * Parcels in a search radius for batch MLS comp enrichment (one query per search).
+ */
+export async function fetchTcadParcelsForCompEnrichment(opts: {
+  latitude: number;
+  longitude: number;
+  radiusMiles: number;
+}): Promise<TcadPropertyDto[]> {
+  if (isTcadCacheConfigured()) {
+    try {
+      const cached = await findTcadParcelsInRadiusBBox(opts);
+      if (cached.length > 0) return cached;
+    } catch (err) {
+      console.warn(
+        "[tcad] cache enrichment prefetch failed, falling back to ArcGIS:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  const live = await fetchTcadParcelsWithinRadiusLive({
+    ...opts,
+    limit: 500,
+  });
+  return live.map(({ distanceMiles: _d, ...dto }) => dto);
 }

@@ -1,10 +1,11 @@
 import { minCloseDateForMaxAgeMonths } from "../comparables/recency";
 import { formatPropertyAddress } from "../comparables/format";
+import { fetchPropertyProfileCached } from "../property-profile/profile-cache";
 import {
-  fetchPropertyProfile,
   PropertyProfileMlsAmbiguousError,
   PropertyProfileNotFoundError,
 } from "../property-profile/fetch-profile";
+import { taxHoldBasisFromProfile } from "../property-profile/tcad-tax";
 import type { PropertyProfileDto } from "../property-profile/types";
 import {
   findPropertiesWithinRadius,
@@ -54,17 +55,6 @@ function classifyViability(netMarginPct: number): FlipViability {
   return "strong";
 }
 
-function taxBasisFromProfile(
-  profile: PropertyProfileDto | null,
-  purchasePrice: number,
-): number {
-  const assessed = profile?.tax?.assessedValue;
-  if (assessed != null && assessed > 0) return assessed;
-  const appraised = profile?.tax?.appraisedValue;
-  if (appraised != null && appraised > 0) return appraised;
-  return purchasePrice;
-}
-
 function subjectFromProfile(
   profile: PropertyProfileDto | null,
   livingAreaSqft: number,
@@ -82,7 +72,7 @@ async function loadEnrichedProfile(
   request: FlipPredictionRequestResolved,
 ): Promise<PropertyProfileDto> {
   try {
-    return await fetchPropertyProfile({
+    return await fetchPropertyProfileCached({
       propId: request.propId ?? null,
       address: request.address ?? null,
     });
@@ -358,7 +348,22 @@ export async function predictFlip(
   }
 
   const arvEstimate = await resolveArv(request, profile, livingAreaSqft);
-  const taxBasis = taxBasisFromProfile(profile, request.purchasePrice);
+  const taxBasis = taxHoldBasisFromProfile(profile, request.purchasePrice);
+  if (
+    profile?.taxCandidates?.length &&
+    taxBasis <= 0
+  ) {
+    throw new FlipPredictionError(
+      "Multiple TCAD parcels match but none have assessable tax values for hold cost",
+      422,
+      {
+        taxCandidates: profile.taxCandidates.map((c) => ({
+          propId: c.propId,
+          situsAddress: c.situsAddress,
+        })),
+      },
+    );
+  }
   const { costs, margins } = buildCostsAndMargins(
     request,
     livingAreaSqft,
