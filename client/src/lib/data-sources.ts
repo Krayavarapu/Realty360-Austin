@@ -16,7 +16,9 @@ export function formatPropertyDataSource(source: PropertyDataSource): string {
 }
 
 export function compRecordDataSource(comp: CompRecordDto): PropertyDataSource {
-  return comp.source === "tcad" ? "tcad" : "mls";
+  if (comp.compRole === "tax_reference") return "tcad";
+  if (comp.taxValue != null || comp.propId != null) return "both";
+  return "mls";
 }
 
 export function unifiedSubjectDataSource(

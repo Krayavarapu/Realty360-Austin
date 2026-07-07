@@ -4,6 +4,7 @@ import {
   sortCompRecords,
   tcadToCompRecord,
 } from "./comp-record";
+import { enrichMlsCompsWithTcad } from "./tcad-enrichment";
 import {
   bucketByMileRing,
   computeDistanceScore,
@@ -304,15 +305,18 @@ export async function fetchUnifiedComparables(
     bathrooms: subject.bathrooms,
   };
 
-  const closedSales = buildCompSection(
-    "sale_comp",
+  const closedComps = await enrichMlsCompsWithTcad(
     mapMlsRowsToComps(closedRows, "sale_comp", matchSubject, radiusMiles),
-    radiusMiles,
   );
+  const openComps = await enrichMlsCompsWithTcad(
+    mapMlsRowsToComps(openRows, "listing_comp", matchSubject, radiusMiles),
+  );
+
+  const closedSales = buildCompSection("sale_comp", closedComps, radiusMiles);
 
   const openListings = buildCompSection(
     "listing_comp",
-    mapMlsRowsToComps(openRows, "listing_comp", matchSubject, radiusMiles),
+    openComps,
     radiusMiles,
   );
 
