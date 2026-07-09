@@ -8,7 +8,7 @@
  *
  * Requires `DATABASE_URL` in `.env.local` or the environment.
  */
-import { loadEnvLocal } from "./load-env-local";
+import { loadEnvLocal } from "../shared/env/load-env-local";
 import {
   TCAD_ARCGIS_QUERY_URL,
   TCAD_ARCGIS_WGS84_SR,

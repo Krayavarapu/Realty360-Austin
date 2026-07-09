@@ -3,7 +3,7 @@ import type { PropertyDetailDto } from "../comparables/types";
 import {
   openDefaultMlsDb,
   resolvePropertyByAddress,
-} from "../../scripts/mls-db";
+} from "../mls/sqlite";
 import {
   fetchTcadAddressLookupOutcome,
   fetchTcadPropertyByPropId,

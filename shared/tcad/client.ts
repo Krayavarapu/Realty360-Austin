@@ -45,6 +45,7 @@ export class TcadApiError extends Error {
 export class TcadAddressAmbiguousError extends Error {
   constructor(
     message: string,
+    public readonly query: string,
     public readonly candidates: TcadPropertyDto[],
   ) {
     super(message);
@@ -458,6 +459,7 @@ export async function fetchTcadPropertyByAddress(
   if (outcome.status === "ambiguous") {
     throw new TcadAddressAmbiguousError(
       "Multiple TCAD properties match that address; refine the query",
+      outcome.query,
       outcome.candidates,
     );
   }

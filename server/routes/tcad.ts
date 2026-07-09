@@ -5,27 +5,12 @@ import {
   TcadAddressAmbiguousError,
   TcadApiError,
 } from "../../shared/tcad/client";
+import { parseAddress, parsePropId } from "../lib/query-params";
 
 export const tcadRouter = Router();
 
-function parsePropId(raw: unknown): number | null {
-  if (raw === undefined || raw === "") return null;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isInteger(value) || value <= 0) return null;
-  return value;
-}
-
-function parseAddress(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  return trimmed.length >= 3 ? trimmed : null;
-}
-
 /**
  * GET /api/tcad/property?propId=367125
- *
- * Looks up a Travis County parcel by TCAD `PROP_ID` via the public ArcGIS layer.
- * Independent of MLS data.
  */
 tcadRouter.get("/property", async (req, res) => {
   const propId = parsePropId(req.query.propId);
@@ -45,8 +30,7 @@ tcadRouter.get("/property", async (req, res) => {
       });
       return;
     }
-
-    res.json(property);
+    res.json({ property });
   } catch (err) {
     if (err instanceof TcadApiError) {
       res.status(err.statusCode).json({ error: err.message });
@@ -58,14 +42,11 @@ tcadRouter.get("/property", async (req, res) => {
 });
 
 /**
- * GET /api/tcad/property/by-address?address=13903 FM812 RD
- *
- * Fuzzy situs-address lookup. Normalizes double spaces and matches compact forms
- * so missing spaces (e.g. "FM812" vs "F M 812") still resolve.
+ * GET /api/tcad/property/by-address?address=504 Bramble Dr Austin
  */
 tcadRouter.get("/property/by-address", async (req, res) => {
   const address = parseAddress(req.query.address);
-  if (address === null) {
+  if (!address) {
     res.status(400).json({
       error: "Missing or invalid query parameter: address (min 3 characters)",
     });
@@ -73,28 +54,13 @@ tcadRouter.get("/property/by-address", async (req, res) => {
   }
 
   try {
-    const result = await fetchTcadPropertyByAddress(address);
-    if (!result) {
-      res.status(404).json({
-        error: "No TCAD property found for that address",
-        address,
-      });
-      return;
-    }
-
-    res.json({
-      ...result.property,
-      match: {
-        score: result.matchScore,
-        query: result.query,
-        matchedSitusAddress: result.matchedSitusAddress,
-      },
-    });
+    const property = await fetchTcadPropertyByAddress(address);
+    res.json({ property });
   } catch (err) {
     if (err instanceof TcadAddressAmbiguousError) {
       res.status(409).json({
         error: err.message,
-        address,
+        query: err.query,
         candidates: err.candidates,
       });
       return;

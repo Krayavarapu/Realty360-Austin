@@ -17,7 +17,7 @@ import {
   openDefaultMlsDb,
   resolvePropertyByAddress,
   type PropertyRow,
-} from "./mls-db";
+} from "../shared/mls/sqlite";
 import { predictFlip, FlipPredictionError } from "../shared/flip/predict-flip";
 import { parseFlipPredictionRequest } from "../shared/flip/prediction-schema";
 import { resolveMlsDbPath } from "../shared/mls/db-path";

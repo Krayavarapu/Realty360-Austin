@@ -24,7 +24,7 @@ import {
   openDefaultMlsDb,
   resolvePropertyByAddress,
   type PropertyRow,
-} from "../../scripts/mls-db";
+} from "../mls/sqlite";
 import {
   fetchPropertyProfileCached,
 } from "../property-profile/profile-cache";

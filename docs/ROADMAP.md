@@ -25,8 +25,7 @@ Living document for project phases, implementation status, and key decisions. Up
 | Repo structure (client / server / shared / scripts) | ✅ Complete | Vite + React + Express |
 | `pnpm install` / `pnpm dev` / `pnpm dev:api` | ✅ Complete | API on port 3001 in dev |
 | `.env.local` with `VITE_MLS_GRID_TOKEN` | ✅ Complete | Required for MLS Grid + seed |
-| `pnpm seed:mls` → `data/mls.sqlite` | ✅ Complete | Re-run only to refresh data |
-| `pnpm seed:mls:open` → same DB | ✅ Complete | Active/Pending open comps; re-run to refresh on-market listings |
+| `pnpm seed:mls` → `data/mls.sqlite` | ✅ Complete | Closed + active/pending residential; re-run to refresh all MLS data |
 | `pnpm build` + `pnpm start` (prod locally) | ✅ Complete | Single server on port 3000 |
 | Vite proxies `/api` → `3001` in dev | ✅ Complete | `vite.config.ts` |
 
@@ -38,9 +37,9 @@ Living document for project phases, implementation status, and key decisions. Up
 |------|--------|-------------|
 | 1.1 Extend MLS seed / SQLite schema | ✅ Complete | Added `list_price`, `has_pool`, `garage_spaces`, `lot_size_acres`, `property_condition`; migrations on DB open; shared condition/pool/garage mappers in `shared/mls/` |
 | 1.2 Comparables mile buckets — 0.5 mi ring | ✅ Complete | `shared/comparables/match-score.ts` — exclusive rings: (0, 0.5], (0.5, 1], (1, 2], … |
-| 1.3 Comparables UI — extended property fields | ✅ Complete | Detail card: list price, pool, garage, lot, house condition (`ComparableDetailCard.tsx`) |
+| 1.3 Comparables UI — extended property fields | ✅ Complete | Subject + comp cards: list price, pool, garage, lot, house condition |
 | 1.4 Comparables UI — condition placement | ✅ Complete | “House Condition” labeled inside card body; match % only in header |
-| 1.5 Comp recency filters | ✅ Complete | `maxAgeMonths` on `/api/properties/by-radius`; filters `close_date` in SQLite; UI sale-recency select (6/12/24 mo) |
+| 1.5 Comp recency filters | ✅ Complete | `maxAgeMonths` on `/api/comparables/unified`; filters `close_date` in SQLite; UI sale-recency select (6/12/24 mo) |
 | 1.6 TCAD ArcGIS — correct layer | ✅ Complete | Use `TCAD/MapServer/0` (not `TCAD_Travis_County_Property/MapServer/3`) |
 | 1.7 TCAD API — lookup by `PROP_ID` | ✅ Complete | `GET /api/tcad/property?propId=` |
 | 1.8 TCAD — optional `geoId` lookup | ⬜ To do | Alternate key for portal `GEO ID` |
@@ -68,7 +67,7 @@ Living document for project phases, implementation status, and key decisions. Up
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 3.1 MLS active / pending pipeline | ✅ Complete | `pnpm seed:mls:open` — Active/Pending into same `properties` table; `findActiveListingsWithinRadius` |
+| 3.1 MLS active / pending pipeline | ✅ Complete | `pnpm seed:mls` seeds closed + active/pending into `properties`; `findActiveListingsWithinRadius` |
 | 3.2 `CompRecordDto` | ✅ Complete | `shared/comparables/comp-record.ts` — `source`, `compRole` (`sale_comp` \| `listing_comp` \| `tax_reference`); `taxValue`, `tcadAcres` |
 | 3.3 Unified comparables API | ✅ Complete | `GET /api/comparables/unified` — MLS closed + MLS open + optional TCAD (`includeTcad=true`) |
 | 3.4 UI — separate comp sections | ✅ Complete | `UnifiedComparablesResults` — closed / active / tax sections via unified API |
@@ -108,14 +107,9 @@ Living document for project phases, implementation status, and key decisions. Up
 
 ## Key API reference
 
-### Comparables (MLS SQLite)
+### Comparables (canonical: unified API)
 
 ```bash
-curl -G "http://localhost:3001/api/properties/by-radius" \
-  --data-urlencode "address=507 Hammack Dr Austin" \
-  --data-urlencode "radiusMiles=2" \
-  --data-urlencode "maxAgeMonths=12"
-
 curl -G "http://localhost:3001/api/comparables/unified" \
   --data-urlencode "address=1613 W Braker Ln Austin" \
   --data-urlencode "radiusMiles=2" \
@@ -176,8 +170,7 @@ https://gis.traviscountytx.gov/server1/rest/services/Boundaries_and_Jurisdiction
 
 ```bash
 pnpm install
-pnpm seed:mls          # after .env.local; refreshes closed sales in data/mls.sqlite
-pnpm seed:mls:open     # active/pending open listings (same DB)
+pnpm seed:mls          # after .env.local; closed + active/pending → data/mls.sqlite
 pnpm seed:tcad         # full Travis County → Neon tcad_parcels (requires DATABASE_URL)
 pnpm dev:api           # Express API :3001 (loads .env.local for DATABASE_URL)
 pnpm dev               # Vite UI :3000 (proxies /api)
@@ -218,11 +211,11 @@ Crosswalk of **6,139** distinct MLS addresses against `tcad_parcels` (app scorin
 | Area | Paths |
 |------|--------|
 | Mile buckets | `shared/comparables/match-score.ts` |
-| Comp recency | `shared/comparables/recency.ts`, `scripts/mls-db.ts`, `server/routes/properties.ts` |
+| Comp recency | `shared/comparables/recency.ts`, `shared/mls/sqlite.ts`, `server/routes/properties.ts` |
 | Unified comps | `shared/comparables/comp-record.ts`, `shared/comparables/unified-search.ts`, `shared/comparables/tcad-enrichment.ts`, `server/routes/comparables.ts` |
 | Flip deal config | `shared/flip/types.ts`, `shared/flip/config.ts`, `shared/flip/deal-costs.ts`, `shared/flip/prediction-types.ts`, `shared/flip/prediction-schema.ts`, `shared/flip/predict-flip.ts`, `server/routes/predict.ts`, `scripts/smoke-flip.ts` |
-| TCAD cache / ETL | `shared/tcad/db.ts`, `scripts/seed-tcad.ts`, `scripts/load-env-local.ts` |
-| MLS schema / seed | `shared/mls/transform.ts`, `shared/mls/condition.ts`, `scripts/mls-db.ts`, `shared/mls/constants.ts`, `scripts/seed-mls-open.ts` |
+| TCAD cache / ETL | `shared/tcad/db.ts`, `scripts/seed-tcad.ts`, `shared/env/load-env-local.ts` |
+| MLS schema / seed | `shared/mls/transform.ts`, `shared/mls/condition.ts`, `shared/mls/sqlite.ts`, `shared/mls/constants.ts`, `scripts/seed-mls.ts` |
 | API DTOs | `shared/comparables/types.ts`, `shared/comparables/property-dto.ts`, `shared/comparables/format.ts` |
 | Property profile | `shared/property-profile/types.ts`, `shared/property-profile/compose.ts`, `shared/property-profile/fetch-profile.ts`, `shared/property-profile/profile-cache.ts`, `shared/property-profile/tcad-tax.ts`, `server/routes/property-profile.ts` |
 | TCAD | `shared/tcad/*`, `server/routes/tcad.ts`, `server/app.ts` |

@@ -10,7 +10,7 @@ import type { PropertyProfileDto } from "../property-profile/types";
 import {
   findPropertiesWithinRadius,
   openDefaultMlsDb,
-} from "../../scripts/mls-db";
+} from "../mls/sqlite";
 import {
   arvFromSimilarComps,
   ARV_MIN_SIMILAR_COMPS,

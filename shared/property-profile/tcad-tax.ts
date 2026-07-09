@@ -1,3 +1,4 @@
+import { pickProfileTaxValue } from "../tcad/tax-value";
 import type { TcadPropertyDto } from "../tcad/types";
 import type {
   PropertyProfileDto,
@@ -5,12 +6,7 @@ import type {
   PropertyProfileTaxCandidate,
 } from "./types";
 
-/** Unified tax value for display — appraised, market, and assessed are equivalent. */
-export function pickProfileTaxValue(tax: PropertyProfileTax): number | null {
-  return (
-    tax.appraisedValue ?? tax.marketValue ?? tax.assessedValue ?? null
-  );
-}
+export { pickProfileTaxValue };
 
 /** Assessed-first basis for annual property tax (hold cost). */
 export function taxHoldValueFromProfileTax(tax: PropertyProfileTax): number | null {

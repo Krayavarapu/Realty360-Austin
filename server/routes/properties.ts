@@ -16,44 +16,34 @@ import {
   resolvePropertyByAddress,
   suggestPropertiesByAddress,
   type PropertyRow,
-} from "../../scripts/mls-db";
+} from "../../shared/mls/sqlite";
+import {
+  parseLimit,
+  parseMaxAgeMonths,
+  parseRadiusMiles,
+  parseSuggestLimit,
+} from "../lib/query-params";
+import {
+  applyDeprecationHeaders,
+  deprecationPayload,
+  type DeprecationNotice,
+} from "../lib/deprecation";
 
 export const propertiesRouter = Router();
 
-function parseRadiusMiles(raw: unknown): number | null {
-  if (raw === undefined || raw === "") return null;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return value;
-}
-
-function parseLimit(raw: unknown, fallback = 50): number | null {
-  if (raw === undefined || raw === "") return fallback;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isInteger(value) || value <= 0) return null;
-  return value;
-}
-
-/** Optional recency window in whole months (1–120). Omitted = no close-date filter. */
-function parseMaxAgeMonths(raw: unknown): number | null | undefined {
-  if (raw === undefined || raw === "") return undefined;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isInteger(value) || value < 1 || value > 120) return null;
-  return value;
-}
+const BY_RADIUS_DEPRECATION: DeprecationNotice = {
+  endpoint: "GET /api/properties/by-radius",
+  message:
+    "Closed-only radius comps are superseded by the unified comparables API (closed + active + optional TCAD, subject profile).",
+  successor: "/api/comparables/unified",
+  sunset: "2026-12-31",
+};
 
 function sortComparables(a: RadiusComparableDto, b: RadiusComparableDto): number {
   if (b.matchPercent !== a.matchPercent) {
     return b.matchPercent - a.matchPercent;
   }
   return a.distanceMiles - b.distanceMiles;
-}
-
-function parseSuggestLimit(raw: unknown, fallback = 8): number | null {
-  if (raw === undefined || raw === "") return fallback;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isInteger(value) || value <= 0 || value > 25) return null;
-  return value;
 }
 
 /**
@@ -149,14 +139,15 @@ propertiesRouter.get("/by-address", (req, res) => {
 });
 
 /**
- * GET /api/properties/by-radius?address=507 Hammack Dr, Austin&radiusMiles=2&maxAgeMonths=12
+ * GET /api/properties/by-radius?address=...&radiusMiles=2&maxAgeMonths=12
  *
- * Resolves a subject property by address, then returns closed listings within
- * `radiusMiles` with bedrooms >= subject beds and bathrooms >= subject baths.
- * Optional `maxAgeMonths` limits comps to sales closed within that many months.
- * Results include match %, mile-ring buckets, and full detail for property cards.
+ * @deprecated Use `GET /api/comparables/unified` instead. This route remains
+ * for backward compatibility and returns `Deprecation` / `Warning` headers plus
+ * a `deprecation` object in the JSON body.
  */
 propertiesRouter.get("/by-radius", (req, res) => {
+  applyDeprecationHeaders(res, BY_RADIUS_DEPRECATION);
+
   const raw =
     typeof req.query.address === "string" ? req.query.address.trim() : "";
   if (!raw) {
@@ -269,6 +260,7 @@ propertiesRouter.get("/by-radius", (req, res) => {
       const buckets = bucketByMileRing(properties, radiusMiles, sortComparables);
 
       res.json({
+        ...deprecationPayload(BY_RADIUS_DEPRECATION),
         match: resolved.match,
         radiusMiles,
         filters: {

@@ -1,16 +1,16 @@
 import fs from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { haversineMiles } from "../shared/comparables/geo";
+import { haversineMiles } from "../comparables/geo";
 import {
   addressQueryMatchesProperty,
   buildAddressLookupPrefixes,
   buildCanonicalAddressNorm,
   parseAddressQuery,
-} from "../shared/mls/address-query";
-import { OPEN_LISTING_STATUSES } from "../shared/mls/constants";
-import { resolveMlsDbPath } from "../shared/mls/db-path";
-import type { CleanProperty } from "../shared/mls/transform";
-import { normalizeAddress } from "../shared/mls/transform";
+} from "./address-query";
+import { OPEN_LISTING_STATUSES } from "./constants";
+import { resolveMlsDbPath } from "./db-path";
+import type { CleanProperty } from "./transform";
+import { normalizeAddress } from "./transform";
 
 /** Full row from `properties` (snake_case column names). */
 export type PropertyRow = CleanProperty & { updated_at?: string };

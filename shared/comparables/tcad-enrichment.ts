@@ -7,14 +7,10 @@ import {
   streetNameLikeToken,
 } from "../tcad/address-query";
 import { fetchTcadParcelsForCompEnrichment } from "../tcad/client";
+import { pickTaxValue } from "../tcad/tax-value";
 import type { TcadPropertyDto } from "../tcad/types";
 
-/** Unified tax value — appraised, market, and assessed are equivalent for display. */
-export function pickTaxValue(tcad: TcadPropertyDto): number | null {
-  return (
-    tcad.appraisedValue ?? tcad.marketValue ?? tcad.assessedValue ?? null
-  );
-}
+export { pickTaxValue } from "../tcad/tax-value";
 
 export function applyTcadToComp(
   comp: CompRecordDto,

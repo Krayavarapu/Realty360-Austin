@@ -63,7 +63,6 @@ The app is built as **Vite + React** (client) and **Express** (API), with shared
         ▲                 ▲                      ▲
         │                 │                      │
    pnpm seed:mls     pnpm seed:tcad         fallback reads
-   pnpm seed:mls:open
 ```
 
 ### 2.2 Request Path (Development)
@@ -87,7 +86,9 @@ Business rules live in `shared/` so the same comp-matching, flip math, TCAD addr
 | `client/` | React UI (Comparables landing, flip results, shadcn components) |
 | `server/` | Express app, route handlers |
 | `shared/` | Domain logic: MLS, TCAD, comparables, property-profile, flip |
-| `scripts/` | Seed jobs (`seed-mls`, `seed-mls-open`, `seed-tcad`), `smoke-flip` |
+| `shared/env/load-env-local.ts` | Loads `.env.local` for Node scripts and Express |
+| `shared/mls/sqlite.ts` | MLS SQLite schema and query helpers (runtime) |
+| `scripts/` | Seed jobs (`seed-mls`, `seed-tcad`), `smoke-flip`, architecture PDF |
 | `data/` | Gitignored runtime data (`mls.sqlite`, raw JSON dumps) |
 | `docs/` | Roadmap and architecture documentation |
 
@@ -102,9 +103,9 @@ Business rules live in `shared/` so the same comp-matching, flip math, TCAD addr
 | **Upstream** | MLS Grid API (`https://api-demo.mlsgrid.com/v2` or production URL) |
 | **Originating system** | `actris` (Austin Board of Realtors) — `shared/mls/constants.ts` |
 | **Local store** | SQLite `data/mls.sqlite`, table `properties` |
-| **Seed commands** | `pnpm seed:mls` (closed residential), `pnpm seed:mls:open` (active/pending) |
+| **Seed command** | `pnpm seed:mls` (closed + active/pending residential) |
 | **Runtime** | API reads SQLite only; no live MLS Grid on user requests |
-| **Token** | `MLS_GRID_TOKEN` or `VITE_MLS_GRID_TOKEN` in `.env.local` (seed + optional client fetch on Home page) |
+| **Token** | `MLS_GRID_TOKEN` or `VITE_MLS_GRID_TOKEN` in `.env.local` (seed only) |
 
 **Row shape:** normalized address, lat/lon, beds/baths/sqft, list/close price, close date, pool, garage, lot acres, property condition, status.
 
@@ -180,13 +181,15 @@ Comps are bucketed into exclusive mile rings (0–0.5, 0.5–1, 1–2 mi, …) w
 | GET | `/api/health` | Liveness check |
 | GET | `/api/properties/suggest` | Address typeahead (MLS) |
 | GET | `/api/properties/by-address` | Single MLS property |
-| GET | `/api/properties/by-radius` | Closed comps in radius |
+| GET | `/api/properties/by-radius` | **Deprecated** — closed comps only; use `/api/comparables/unified` |
 | GET | `/api/comparables/unified` | Closed + open + optional TCAD; optional `propId`; returns `subjectProfile` |
 | GET | `/api/property/profile` | Composed MLS + TCAD profile |
 | GET | `/api/tcad/property` | TCAD parcel by propId or address |
 | POST | `/api/predict/flip` | Rules-based flip prediction |
 
 All routes are mounted in `server/app.ts`.
+
+**Deprecation:** `GET /api/properties/by-radius` responds with `Deprecation: true`, a `Warning` header, and a `deprecation` object in the JSON body. Prefer `GET /api/comparables/unified` for all new integrations.
 
 ---
 
@@ -195,7 +198,7 @@ All routes are mounted in `server/app.ts`.
 ### 7.1 `shared/mls/`
 
 - RESO property types, MLS Grid client, address normalization
-- `scripts/mls-db.ts`: SQLite schema, radius queries, address resolution
+- `shared/mls/sqlite.ts`: SQLite schema, radius queries, address resolution
 
 ### 7.2 `shared/tcad/`
 
@@ -297,8 +300,7 @@ Override: request body `arv` → manual mode.
 
 ```bash
 pnpm install
-pnpm seed:mls              # MLS closed → data/mls.sqlite
-pnpm seed:mls:open         # Active/pending into same DB
+pnpm seed:mls              # MLS closed + active/pending → data/mls.sqlite
 pnpm seed:tcad             # Full county → Neon tcad_parcels
 pnpm dev:api               # API :3001
 pnpm dev                   # UI :3000
