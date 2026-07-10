@@ -1,6 +1,6 @@
 import type PDFKit from "pdfkit";
 import { COLORS, FONTS, PAGE, TYPE } from "./theme";
-import { contentWidth, ensureSpace } from "./layout";
+import { contentWidth, ensureSpace, pdfSafeText } from "./layout";
 
 type Doc = PDFKit.PDFDocument;
 
@@ -18,15 +18,17 @@ interface BoxSpec {
 
 function drawNode(doc: Doc, spec: BoxSpec): void {
   const { x, y, w, h, title, subtitle, fill, stroke, textColor = COLORS.white } = spec;
+  const safeTitle = pdfSafeText(title);
+  const safeSubtitle = subtitle ? pdfSafeText(subtitle) : undefined;
   doc.roundedRect(x, y, w, h, 6).fillAndStroke(fill, stroke);
   doc.font(FONTS.bold).fontSize(9).fillColor(textColor);
-  doc.text(title, x + 8, y + (subtitle ? 10 : h / 2 - 5), {
+  doc.text(safeTitle, x + 8, y + (subtitle ? 10 : h / 2 - 5), {
     width: w - 16,
     align: "center",
   });
-  if (subtitle) {
+  if (safeSubtitle) {
     doc.font(FONTS.regular).fontSize(7.5).fillColor(textColor);
-    doc.text(subtitle, x + 8, y + 24, { width: w - 16, align: "center" });
+    doc.text(safeSubtitle, x + 8, y + 24, { width: w - 16, align: "center" });
   }
 }
 
@@ -62,7 +64,7 @@ function diagramFrame(doc: Doc, title: string, height: number): number {
     .font(FONTS.bold)
     .fontSize(TYPE.caption)
     .fillColor(COLORS.slate)
-    .text(title.toUpperCase(), PAGE.margin, y0, { width: w });
+    .text(pdfSafeText(title).toUpperCase(), PAGE.margin, y0, { width: w });
   return y0 + 14;
 }
 
@@ -370,7 +372,7 @@ export function drawCompRoles(doc: Doc): void {
       .font(FONTS.regular)
       .fontSize(7)
       .fillColor(COLORS.slate)
-      .text(role.detail, x + 6, y0 + 56, { width: cw - 12, align: "center" });
+      .text(pdfSafeText(role.detail), x + 6, y0 + 56, { width: cw - 12, align: "center" });
   });
 
   doc.y = y0 + 88;
@@ -402,7 +404,7 @@ export function drawCompEnrichment(doc: Doc): void {
       .font(FONTS.regular)
       .fontSize(8.5)
       .fillColor(COLORS.text)
-      .text(label, x + 28, y + 8, { width: w - 36 });
+      .text(pdfSafeText(label), x + 28, y + 8, { width: w - 36 });
     if (i < items.length - 1) arrowDown(doc, x + w / 2, y + h, y + h + 8);
     y += h + (i < items.length - 1 ? 8 : 0);
   });
@@ -495,7 +497,7 @@ export function drawViabilityBands(doc: Doc): void {
       .font(FONTS.regular)
       .fontSize(7)
       .fillColor(COLORS.white)
-      .text(b.pct, bx + 4, y0 + 22, { width: bw - 8, align: "center" });
+      .text(pdfSafeText(b.pct), bx + 4, y0 + 22, { width: bw - 8, align: "center" });
     bx += bw;
   });
 

@@ -1,4 +1,3 @@
-import { haversineMiles } from "./geo";
 import type { CompRecordDto } from "./types";
 import {
   isAcceptableTcadAddressScore,
@@ -30,8 +29,6 @@ export function applyTcadToComp(
     deedDate: tcad.deedDate ?? comp.deedDate,
   };
 }
-
-const NEAREST_PARCEL_RADIUS_MILES = 0.15;
 
 export interface TcadEnrichmentContext {
   latitude: number;
@@ -96,6 +93,27 @@ function candidatePool(
   return index.parcels;
 }
 
+/** Require an acceptable address score and matching situs_num when the MLS comp has one. */
+function confirmTcadAddressMatch(
+  comp: CompRecordDto,
+  tcad: TcadPropertyDto,
+): boolean {
+  const tokens = parseTcadAddressTokens(comp.address);
+  const score = scoreTcadAddressMatch(
+    comp.address,
+    tcad.situsAddress,
+    tokens.zip,
+  );
+  if (!isAcceptableTcadAddressScore(score)) return false;
+
+  if (tokens.streetNumber) {
+    const parcelNumber = streetNumberFromParcel(tcad);
+    if (!parcelNumber || parcelNumber !== tokens.streetNumber) return false;
+  }
+
+  return true;
+}
+
 function matchTcadByAddress(
   comp: CompRecordDto,
   index: TcadEnrichmentIndex,
@@ -125,53 +143,11 @@ function matchTcadByAddress(
       candidates = [];
     }
     ranked = rankAddressCandidates(comp.address, candidates);
-  } else if (ranked.length === 0 && streetLike && tokens.zip) {
-    candidates = filterStreetLike(index.parcels, streetLike);
-    ranked = rankAddressCandidates(comp.address, candidates);
   }
 
-  return ranked[0]?.dto ?? null;
-}
-
-function matchTcadByNearest(
-  comp: CompRecordDto,
-  parcels: TcadPropertyDto[],
-): TcadPropertyDto | null {
-  const lat = comp.latitude;
-  const lon = comp.longitude;
-  if (lat == null || lon == null) return null;
-
-  const tokens = parseTcadAddressTokens(comp.address);
-  const streetLike = streetNameLikeToken(tokens);
-
-  const nearby = parcels
-    .filter((p) => p.latitude != null && p.longitude != null)
-    .map((p) => ({
-      parcel: p,
-      dist: haversineMiles(lat, lon, p.latitude!, p.longitude!),
-    }))
-    .filter((r) => r.dist <= NEAREST_PARCEL_RADIUS_MILES)
-    .sort((a, b) => a.dist - b.dist);
-
-  if (nearby.length === 0) return null;
-
-  if (streetLike) {
-    const streetMatches = nearby.filter((r) =>
-      (r.parcel.situsAddress ?? "").toUpperCase().includes(streetLike),
-    );
-    if (streetMatches.length > 0) return streetMatches[0]!.parcel;
-  }
-
-  return nearby[0]!.parcel;
-}
-
-function matchTcadFromIndex(
-  comp: CompRecordDto,
-  index: TcadEnrichmentIndex,
-): TcadPropertyDto | null {
-  return (
-    matchTcadByAddress(comp, index) ?? matchTcadByNearest(comp, index.parcels)
-  );
+  const best = ranked[0]?.dto ?? null;
+  if (!best || !confirmTcadAddressMatch(comp, best)) return null;
+  return best;
 }
 
 async function loadEnrichmentIndex(
@@ -182,8 +158,8 @@ async function loadEnrichmentIndex(
 }
 
 /**
- * Attach TCAD tax fields to MLS sale/listing comps.
- * One TCAD radius prefetch per search, then in-memory address/coordinate matching.
+ * Attach TCAD tax fields to MLS sale/listing comps when a TCAD situs address
+ * matches the MLS comp address. No nearest-parcel or coordinate fallback.
  */
 export async function enrichMlsCompsWithTcad(
   comps: CompRecordDto[],
@@ -205,7 +181,7 @@ export async function enrichMlsCompsWithTcad(
 
   const enrichedByKey = new Map<string, CompRecordDto>();
   for (const comp of mlsComps) {
-    const tcad = matchTcadFromIndex(comp, index);
+    const tcad = matchTcadByAddress(comp, index);
     if (!tcad) continue;
     const key = comp.listingKey ?? comp.address;
     enrichedByKey.set(key, applyTcadToComp(comp, tcad));

@@ -1,6 +1,6 @@
 import type PDFKit from "pdfkit";
 import { COLORS, FONTS, PAGE, TYPE } from "./theme";
-import { contentWidth } from "./layout";
+import { contentWidth, pdfSafeText } from "./layout";
 import { tocEntries } from "./parse-md";
 
 export function drawCoverPage(doc: PDFKit.PDFDocument): void {
@@ -56,7 +56,7 @@ export function drawCoverPage(doc: PDFKit.PDFDocument): void {
     .font(FONTS.regular)
     .fontSize(TYPE.body)
     .fillColor(COLORS.textMuted)
-    .text("July 7, 2026  ·  Austin / Travis County, TX", 156, badgeY + 8);
+    .text(pdfSafeText("July 7, 2026  |  Austin / Travis County, TX"), 156, badgeY + 8);
 
   // Feature pills
   const pills = [
@@ -86,7 +86,7 @@ export function drawCoverPage(doc: PDFKit.PDFDocument): void {
   const stackItems = [
     "Client: Vite + React + shadcn/ui",
     "API: Express (TypeScript)",
-    "Domain: shared/ — comps, flip, TCAD, property-profile",
+    "Domain: shared/ - comps, flip, TCAD, property-profile",
     "Data: data/mls.sqlite + Neon tcad_parcels",
   ];
   doc.font(FONTS.regular).fontSize(TYPE.body).fillColor(COLORS.text);
@@ -100,7 +100,9 @@ export function drawCoverPage(doc: PDFKit.PDFDocument): void {
     .fontSize(TYPE.caption)
     .fillColor(COLORS.slate)
     .text(
-      "Generated from docs/ARCHITECTURE_REPORT.md · feature/tax-data-pipeline",
+      pdfSafeText(
+        "Generated from docs/ARCHITECTURE_REPORT.md | feature/tax-data-pipeline",
+      ),
       56,
       h - 56,
       { width: w - 112, align: "center" },

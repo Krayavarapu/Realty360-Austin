@@ -12,12 +12,33 @@ export function ensureSpace(doc: PdfDoc, height: number): void {
   if (doc.y + height > bottom) doc.addPage();
 }
 
-export function stripMd(text: string): string {
+/**
+ * PDFKit's built-in Helvetica (WinAnsi) lacks many Unicode symbols. Arrows like
+ * → and ↔ render as garbled "!" characters in viewers — normalize to ASCII.
+ */
+export function pdfSafeText(text: string): string {
   return text
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .trim();
+    .replace(/\u2192/g, "->")
+    .replace(/\u2190/g, "<-")
+    .replace(/\u2194/g, "<->")
+    .replace(/\u00b7/g, " | ")
+    .replace(/\u2014/g, " - ")
+    .replace(/\u2013/g, "-")
+    .replace(/\u2265/g, ">=")
+    .replace(/\u2264/g, "<=")
+    .replace(/\u00b1/g, "+/-")
+    .replace(/\u2026/g, "...")
+    .replace(/\u00d7/g, "x");
+}
+
+export function stripMd(text: string): string {
+  return pdfSafeText(
+    text
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .trim(),
+  );
 }
 
 export function drawPageFooter(doc: PdfDoc, pageNum: number): void {
@@ -32,7 +53,7 @@ export function drawPageFooter(doc: PdfDoc, pageNum: number): void {
     .font(FONTS.regular)
     .fontSize(TYPE.caption)
     .fillColor(COLORS.slate);
-  doc.text("Realty360 Austin — Architecture Report v1.3", PAGE.margin, y - 4, {
+  doc.text(pdfSafeText("Realty360 Austin - Architecture Report v1.3"), PAGE.margin, y - 4, {
     width: contentWidth(doc) / 2,
     align: "left",
   });
@@ -192,7 +213,7 @@ export function drawTable(
 }
 
 export function drawCodeBlock(doc: PdfDoc, lines: string[]): void {
-  const text = lines.join("\n");
+  const text = pdfSafeText(lines.join("\n"));
   const w = contentWidth(doc);
   doc.font(FONTS.mono).fontSize(TYPE.mono);
   const innerW = w - 20;
@@ -228,7 +249,7 @@ export function drawDiagramCaption(doc: PdfDoc, caption: string): void {
     .font(FONTS.oblique)
     .fontSize(TYPE.caption)
     .fillColor(COLORS.slate)
-    .text(caption, PAGE.margin, doc.y, {
+    .text(pdfSafeText(caption), PAGE.margin, doc.y, {
       width: contentWidth(doc),
       align: "center",
     });
