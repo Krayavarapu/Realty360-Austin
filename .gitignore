@@ -105,6 +105,8 @@ temp/
 *.sqlite
 *.sqlite3
 data/raw-properties.json
+data/raw-properties-closed.json
+data/raw-properties-open.json
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/

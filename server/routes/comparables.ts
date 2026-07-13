@@ -4,60 +4,26 @@ import {
   UnifiedComparablesError,
 } from "../../shared/comparables/unified-search";
 import { TcadApiError } from "../../shared/tcad/client";
+import {
+  parseIncludeTcad,
+  parseLimit,
+  parseMaxAgeMonths,
+  parsePropIdOptional,
+  parseRadiusMiles,
+} from "../lib/query-params";
 
 export const comparablesRouter = Router();
-
-function parseRadiusMiles(raw: unknown): number | null {
-  if (raw === undefined || raw === "") return null;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return value;
-}
-
-function parseLimit(raw: unknown, fallback = 50): number | null {
-  if (raw === undefined || raw === "") return fallback;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isInteger(value) || value <= 0) return null;
-  return value;
-}
-
-function parseMaxAgeMonths(raw: unknown): number | null | undefined {
-  if (raw === undefined || raw === "") return undefined;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isInteger(value) || value < 1 || value > 120) return null;
-  return value;
-}
-
-function parsePropId(raw: unknown): number | null | undefined {
-  if (raw === undefined || raw === "") return undefined;
-  const value = typeof raw === "string" ? Number(raw.trim()) : Number(raw);
-  if (!Number.isInteger(value) || value <= 0) return null;
-  return value;
-}
-
-function parseIncludeTcad(raw: unknown): boolean {
-  if (raw === undefined || raw === "") return false;
-  const value = typeof raw === "string" ? raw.trim().toLowerCase() : raw;
-  return value === "true" || value === "1" || value === true;
-}
 
 /**
  * GET /api/comparables/unified?address=507 Hammack Dr Austin&radiusMiles=2
  *
  * Returns MLS closed sales, MLS active/pending listings, and optionally TCAD
  * tax-reference parcels within `radiusMiles` of the subject.
- *
- * Query params:
- * - address and/or propId (at least one required)
- * - radiusMiles (required)
- * - maxAgeMonths (optional, closed sales only)
- * - limit (optional, default 50 per section)
- * - includeTcad=true (optional, fetches nearby TCAD parcels)
  */
 comparablesRouter.get("/unified", async (req, res) => {
   const address =
     typeof req.query.address === "string" ? req.query.address.trim() : "";
-  const propId = parsePropId(req.query.propId);
+  const propId = parsePropIdOptional(req.query.propId);
 
   if (!address && propId === undefined) {
     res.status(400).json({

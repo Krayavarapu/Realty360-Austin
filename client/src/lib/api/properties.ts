@@ -1,11 +1,9 @@
 import type {
-  ComparablesByRadiusResponse,
   PropertyDetailDto,
   UnifiedComparablesResponse,
 } from "@shared/comparables/types";
 
 export type {
-  ComparablesByRadiusResponse,
   PropertyDetailDto,
   RadiusComparableDto,
 } from "@shared/comparables/types";
@@ -24,36 +22,6 @@ export class PropertiesApiError extends Error {
     super(message);
     this.name = "PropertiesApiError";
   }
-}
-
-export async function fetchComparablesByRadius(
-  address: string,
-  radiusMiles: number,
-  opts?: { limit?: number; maxAgeMonths?: number },
-): Promise<ComparablesByRadiusResponse> {
-  const params = new URLSearchParams({
-    address: address.trim(),
-    radiusMiles: String(radiusMiles),
-  });
-  if (opts?.limit != null) {
-    params.set("limit", String(opts.limit));
-  }
-  if (opts?.maxAgeMonths != null) {
-    params.set("maxAgeMonths", String(opts.maxAgeMonths));
-  }
-
-  const res = await fetch(`/api/properties/by-radius?${params}`);
-  const body = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    const message =
-      typeof body?.error === "string"
-        ? body.error
-        : `Request failed (${res.status})`;
-    throw new PropertiesApiError(message, res.status, body);
-  }
-
-  return body as ComparablesByRadiusResponse;
 }
 
 export async function fetchAddressSuggestions(

@@ -65,6 +65,22 @@ export default function ComparablesLanding() {
     "comparables",
   );
 
+  const [selectedPropId, setSelectedPropId] = useState<number | null>(null);
+
+  async function runComparablesSearch(
+    trimmed: string,
+    radius: number,
+    propId?: number | null,
+  ) {
+    const data = await fetchUnifiedComparables(trimmed, radius, {
+      propId: propId ?? undefined,
+      maxAgeMonths:
+        maxAgeMonths === "all" ? undefined : Number(maxAgeMonths),
+      includeTcad,
+    });
+    setResult(data);
+  }
+
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -88,6 +104,7 @@ export default function ComparablesLanding() {
     setFlipResult(null);
     setFlipError(null);
     setResultsTab("comparables");
+    setSelectedPropId(null);
     setLoading(true);
     try {
       const { suggestions } = await fetchAddressSuggestions(trimmed, { limit: 10 });
@@ -102,18 +119,35 @@ export default function ComparablesLanding() {
         }
       }
 
-      const data = await fetchUnifiedComparables(trimmed, radius, {
-        maxAgeMonths:
-          maxAgeMonths === "all" ? undefined : Number(maxAgeMonths),
-        includeTcad,
-      });
-      setResult(data);
+      await runComparablesSearch(trimmed, radius);
     } catch (err) {
       setResult(null);
       if (err instanceof PropertiesApiError) {
         setError(err.message);
       } else {
         setError("Failed to fetch comparables. Is the API server running?");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSelectPropId(propId: number | null) {
+    setSelectedPropId(propId);
+    if (!address.trim()) return;
+
+    const radius = Number(radiusMiles);
+    if (!Number.isFinite(radius) || radius <= 0) return;
+
+    setError(null);
+    setLoading(true);
+    try {
+      await runComparablesSearch(address.trim(), radius, propId);
+    } catch (err) {
+      if (err instanceof PropertiesApiError) {
+        setError(err.message);
+      } else {
+        setError("Failed to refresh comparables for selected parcel.");
       }
     } finally {
       setLoading(false);
@@ -307,7 +341,11 @@ export default function ComparablesLanding() {
               </TabsList>
 
               <TabsContent value="comparables" className="mt-0">
-                <UnifiedComparablesResults result={result} />
+                <UnifiedComparablesResults
+                  result={result}
+                  selectedPropId={selectedPropId}
+                  onSelectPropId={handleSelectPropId}
+                />
               </TabsContent>
 
               <TabsContent value="flip" className="mt-0 space-y-5">

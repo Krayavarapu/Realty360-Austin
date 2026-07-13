@@ -10,6 +10,8 @@ import { SubjectPropertyCard } from "./SubjectPropertyCard";
 
 interface UnifiedComparablesResultsProps {
   result: UnifiedComparablesResponse;
+  selectedPropId?: number | null;
+  onSelectPropId?: (propId: number | null) => void;
 }
 
 function compRecordKey(comp: CompRecordDto): string {
@@ -146,6 +148,8 @@ function CompSection({
 
 export function UnifiedComparablesResults({
   result,
+  selectedPropId,
+  onSelectPropId,
 }: UnifiedComparablesResultsProps) {
   const [openKey, setOpenKey] = useState<string | null>(null);
 
@@ -160,7 +164,11 @@ export function UnifiedComparablesResults({
 
   return (
     <div className="space-y-10">
-      <SubjectPropertyCard result={result} />
+      <SubjectPropertyCard
+        result={result}
+        selectedPropId={selectedPropId}
+        onSelectPropId={onSelectPropId}
+      />
 
       <CompSection
         section={result.sections.closedSales}

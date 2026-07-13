@@ -1,10 +1,16 @@
 # Realty360 · Austin Edition
 
+Comparables search and flip analysis for Travis County residential properties. MLS closed sales and listings come from a local SQLite cache; tax and parcel data from TCAD (Postgres cache + ArcGIS fallback).
+
+**Docs:** [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) (run locally) · [docs/ROADMAP.md](docs/ROADMAP.md) (status) · [docs/ARCHITECTURE_REPORT.md](docs/ARCHITECTURE_REPORT.md) (system design)
+
+---
+
 ## Data Collection, Enrichment & Pricing Methodology
 
-**Version:** 1.0.0 · **Data Vintage:** February 19, 2026 · **Market:** Austin, TX (Travis County)
+> **Note:** Sections 2–12 below describe the original v1.0 hedonic calculator methodology (embedded constants). The live app uses MLS + TCAD APIs and the flip engine documented in `docs/ARCHITECTURE_REPORT.md`. This section is retained as historical reference for adjustment-factor calibration.
 
-For local install and run instructions, see [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md).
+**Version:** 1.0.0 · **Data Vintage:** February 19, 2026 · **Market:** Austin, TX (Travis County)
 
 ---
 
@@ -27,9 +33,11 @@ For local install and run instructions, see [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOP
 
 ## 1. Overview
 
-Realty360 Austin Edition is a browser-based, deterministic home price estimation tool for 3-bedroom residential properties in Austin, Texas. The tool uses a **hedonic pricing model** — a method that decomposes a property's market value into the sum of its individual characteristics — calibrated against real market data collected in February 2026.
+Realty360 Austin Edition is a **comparables and flip-analysis** tool for residential properties in Travis County, Texas. At runtime it reads seeded MLS data from SQLite and TCAD parcel/tax data from a Postgres cache (with live ArcGIS fallback). The flip engine uses deterministic ARV and cost-stack math on closed MLS comps — no ML inference.
 
-No machine learning inference, no AI-generated numbers, and no live API calls occur at runtime. All data is embedded directly in the application as structured constants, and all calculations are performed client-side using pure arithmetic.
+For architecture, API routes, and data flows, see **`docs/ARCHITECTURE_REPORT.md`**.
+
+The sections below (2–12) document the **original v1.0 hedonic calculator** used to calibrate adjustment factors; that embedded client-only calculator has been removed from the app.
 
 ---
 

@@ -1,4 +1,6 @@
 /** Full property fields for detail cards and API responses. */
+import type { PropertyProfileDto } from "../property-profile/types";
+
 export interface PropertyDetailDto {
   listingKey: string;
   listingId: string;
@@ -73,6 +75,8 @@ export interface CompRecordDto {
   soldDate: string;
   pricePerSqft: number | null;
   daysOnMarket: number | null;
+  /** Unified TCAD tax value (appraised / market / assessed — equivalent for display). */
+  taxValue: number | null;
   appraisedValue: number | null;
   marketValue: number | null;
   assessedValue: number | null;
@@ -112,6 +116,8 @@ export interface UnifiedComparablesResponse {
     latitude: number | null;
     longitude: number | null;
   } | null;
+  /** Cached MLS + TCAD profile for flip analysis and other downstream use. */
+  subjectProfile: PropertyProfileDto;
   sections: {
     closedSales: UnifiedCompSection;
     openListings: UnifiedCompSection;

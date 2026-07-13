@@ -99,26 +99,16 @@ export function CompRecordDetailCard({
               TCAD PROP_ID: {comp.propId}
             </div>
           )}
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="bg-secondary/50 rounded p-2">
-              <div className="section-label text-[9px]">Appraised</div>
-              <div className="font-mono font-medium mt-0.5">
-                {comp.appraisedValue != null
-                  ? formatPrice(comp.appraisedValue)
-                  : "—"}
-              </div>
+          {comp.taxValue != null && (
+            <div className="flex items-center justify-between text-xs bg-secondary/50 rounded px-3 py-2">
+              <span className="section-label">Tax Value</span>
+              <span className="font-mono font-medium">
+                {formatPrice(comp.taxValue)}
+              </span>
             </div>
-            <div className="bg-secondary/50 rounded p-2">
-              <div className="section-label text-[9px]">Market value</div>
-              <div className="font-mono font-medium mt-0.5">
-                {comp.marketValue != null
-                  ? formatPrice(comp.marketValue)
-                  : "—"}
-              </div>
-            </div>
-          </div>
+          )}
           <div className="flex items-center justify-between text-xs bg-secondary/50 rounded px-3 py-2">
-            <span className="section-label">Lot (TCAD)</span>
+            <span className="section-label">TCAD Acres</span>
             <span className="font-mono">
               {formatLotAcres(comp.tcadAcres ?? comp.lotSizeAcres)}
             </span>
@@ -171,13 +161,22 @@ export function CompRecordDetailCard({
             <div className="bg-secondary/50 rounded p-2 text-center">
               <div className="section-label text-[9px] flex items-center justify-center gap-1">
                 <Trees size={9} className="text-amber-400/70" />
-                Lot
+                {comp.tcadAcres != null ? "TCAD Acres" : "Lot"}
               </div>
               <div className="font-mono font-medium mt-0.5">
-                {formatLotAcres(comp.lotSizeAcres)}
+                {formatLotAcres(comp.tcadAcres ?? comp.lotSizeAcres)}
               </div>
             </div>
           </div>
+
+          {comp.taxValue != null && (
+            <div className="flex items-center justify-between gap-3 text-xs bg-secondary/50 rounded px-3 py-2">
+              <span className="section-label">Tax Value</span>
+              <span className="font-mono font-medium">
+                {formatPrice(comp.taxValue)}
+              </span>
+            </div>
+          )}
 
           {comp.condition && (
             <div className="flex items-center justify-between gap-3 text-xs bg-secondary/50 rounded px-3 py-2">

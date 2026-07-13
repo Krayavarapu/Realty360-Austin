@@ -3,6 +3,7 @@ import type { PropertyRowLike } from "./property-dto";
 import type { CompRecordDto, CompRole, CompSource } from "./types";
 import { formatPropertyConditionLabel } from "../mls/condition";
 import type { TcadPropertyDto } from "../tcad/types";
+import { pickTaxValue } from "./tcad-enrichment";
 
 function normalizeHasPool(value: unknown): boolean | null {
   if (value === null || value === undefined) return null;
@@ -74,6 +75,7 @@ export function mlsRowToCompRecord(
     soldDate: formatSoldDate(row.close_date),
     pricePerSqft: pricePerSqftFrom(price, sqft),
     daysOnMarket: row.days_on_market,
+    taxValue: null,
     appraisedValue: null,
     marketValue: null,
     assessedValue: null,
@@ -118,6 +120,7 @@ export function tcadToCompRecord(
     soldDate: "—",
     pricePerSqft: null,
     daysOnMarket: null,
+    taxValue: pickTaxValue(tcad),
     appraisedValue: tcad.appraisedValue,
     marketValue: tcad.marketValue,
     assessedValue: tcad.assessedValue,

@@ -4,6 +4,7 @@ import {
   sortCompRecords,
   tcadToCompRecord,
 } from "./comp-record";
+import { enrichMlsCompsWithTcad } from "./tcad-enrichment";
 import {
   bucketByMileRing,
   computeDistanceScore,
@@ -23,13 +24,16 @@ import {
   openDefaultMlsDb,
   resolvePropertyByAddress,
   type PropertyRow,
-} from "../../scripts/mls-db";
+} from "../mls/sqlite";
 import {
-  fetchTcadAddressLookupOutcome,
-  fetchTcadParcelsWithinRadius,
-  fetchTcadPropertyByPropId,
-} from "../tcad/client";
-import type { TcadPropertyDto } from "../tcad/types";
+  fetchPropertyProfileCached,
+} from "../property-profile/profile-cache";
+import {
+  PropertyProfileMlsAmbiguousError,
+  PropertyProfileNotFoundError,
+} from "../property-profile/fetch-profile";
+import type { PropertyProfileDto } from "../property-profile/types";
+import { fetchTcadParcelsWithinRadius } from "../tcad/client";
 
 export class UnifiedComparablesError extends Error {
   constructor(
@@ -58,8 +62,8 @@ interface ResolvedSubject {
   bathrooms: number | null;
   mls: PropertyDetailDto | null;
   mlsRow: PropertyRow | null;
-  tcad: TcadPropertyDto | null;
   match: UnifiedComparablesResponse["match"];
+  profile: PropertyProfileDto;
 }
 
 function buildCompSection(
@@ -121,26 +125,11 @@ function mapMlsRowsToComps(
   );
 }
 
-async function tryTcadAddressLookup(
-  address: string,
-): Promise<TcadPropertyDto | null> {
-  try {
-    const outcome = await fetchTcadAddressLookupOutcome(address);
-    if (outcome.status === "single" && outcome.property) {
-      return outcome.property;
-    }
-  } catch {
-    // TCAD situs lookup is optional when MLS already supplies coordinates.
-  }
-  return null;
-}
-
-async function resolveUnifiedSubject(
+async function loadSubjectProfile(
   input: UnifiedComparablesInput,
-): Promise<ResolvedSubject> {
+): Promise<PropertyProfileDto> {
   const address = input.address?.trim() || null;
   const propId = input.propId ?? null;
-  const includeTcad = input.includeTcad === true;
 
   if (!address && propId == null) {
     throw new UnifiedComparablesError(
@@ -149,89 +138,78 @@ async function resolveUnifiedSubject(
     );
   }
 
-  let mls: PropertyDetailDto | null = null;
-  let mlsRow: PropertyRow | null = null;
-  let match: UnifiedComparablesResponse["match"] = null;
-  let tcad: TcadPropertyDto | null = null;
-
-  if (propId != null) {
-    try {
-      tcad = await fetchTcadPropertyByPropId(propId);
-    } catch {
-      if (!address) {
-        throw new UnifiedComparablesError(
-          "Could not load TCAD property for that propId",
-          502,
-          { propId },
-        );
-      }
+  try {
+    return await fetchPropertyProfileCached({ address, propId });
+  } catch (err) {
+    if (err instanceof PropertyProfileNotFoundError) {
+      throw new UnifiedComparablesError(err.message, 404, {
+        query: err.query,
+      });
     }
+    if (err instanceof PropertyProfileMlsAmbiguousError) {
+      throw new UnifiedComparablesError(err.message, 409, {
+        address: err.address,
+        properties: err.candidates,
+      });
+    }
+    throw err;
+  }
+}
+
+function resolveMlsRowForProfile(
+  profile: PropertyProfileDto,
+): { mlsRow: PropertyRow | null; match: UnifiedComparablesResponse["match"] } {
+  const lookupAddress = profile.identifiers.address;
+  if (!lookupAddress) {
+    return { mlsRow: null, match: profile.identifiers.propId != null ? "tcad" : null };
   }
 
-  if (address) {
-    const db = openDefaultMlsDb();
-    try {
-      const resolved = resolvePropertyByAddress(db, address);
-      if (resolved.status === "found") {
-        mlsRow = resolved.property;
-        mls = toPropertyDetailDto(resolved.property);
-        match = resolved.match;
-      } else if (resolved.status === "multiple") {
-        throw new UnifiedComparablesError(
-          "Multiple MLS properties match that address; refine the query",
-          409,
-          {
-            addressNorm: resolved.addressNorm,
-            properties: resolved.properties.map(toPropertyDetailDto),
-          },
-        );
-      }
-    } finally {
-      db.close();
+  const db = openDefaultMlsDb();
+  try {
+    const resolved = resolvePropertyByAddress(db, lookupAddress);
+    if (resolved.status === "found") {
+      return { mlsRow: resolved.property, match: resolved.match };
     }
-
-    const mlsHasCoords =
-      mls?.latitude != null && mls?.longitude != null;
-    const needsTcadForCoords = !mlsHasCoords;
-
-    if (!tcad && (needsTcadForCoords || includeTcad)) {
-      const tcadHit = await tryTcadAddressLookup(address);
-      if (tcadHit) {
-        tcad = tcadHit;
-        if (!match) match = "tcad";
-      }
+    if (resolved.status === "multiple") {
+      throw new UnifiedComparablesError(
+        "Multiple MLS properties match that address; refine the query",
+        409,
+        {
+          addressNorm: resolved.addressNorm,
+          properties: resolved.properties.map(toPropertyDetailDto),
+        },
+      );
     }
-  } else if (tcad?.situsAddress) {
-    const db = openDefaultMlsDb();
-    try {
-      const resolved = resolvePropertyByAddress(db, tcad.situsAddress);
-      if (resolved.status === "found") {
-        mlsRow = resolved.property;
-        mls = toPropertyDetailDto(resolved.property);
-        match = resolved.match;
-      }
-    } finally {
-      db.close();
-    }
+  } finally {
+    db.close();
   }
 
-  const latitude =
-    mls?.latitude ?? tcad?.latitude ?? null;
-  const longitude =
-    mls?.longitude ?? tcad?.longitude ?? null;
+  return {
+    mlsRow: null,
+    match: profile.identifiers.propId != null ? "tcad" : null,
+  };
+}
+
+function buildSubjectFromProfile(
+  profile: PropertyProfileDto,
+  mlsRow: PropertyRow | null,
+  match: UnifiedComparablesResponse["match"],
+): ResolvedSubject {
+  const latitude = profile.location.latitude;
+  const longitude = profile.location.longitude;
 
   if (latitude == null || longitude == null) {
     throw new UnifiedComparablesError(
       "Subject property has no coordinates for radius search",
       422,
       {
-        subject: mls,
-        subjectTcad: tcad
+        subject: profile.identifiers,
+        subjectTcad: profile.identifiers.propId
           ? {
-              propId: tcad.propId,
-              situsAddress: tcad.situsAddress,
-              latitude: tcad.latitude,
-              longitude: tcad.longitude,
+              propId: profile.identifiers.propId,
+              situsAddress: profile.identifiers.addressLine,
+              latitude,
+              longitude,
             }
           : null,
       },
@@ -241,13 +219,21 @@ async function resolveUnifiedSubject(
   return {
     latitude,
     longitude,
-    bedrooms: mls?.bedrooms ?? null,
-    bathrooms: mls?.bathrooms ?? null,
-    mls,
+    bedrooms: profile.physical.bedrooms,
+    bathrooms: profile.physical.bathrooms,
+    mls: mlsRow ? toPropertyDetailDto(mlsRow) : null,
     mlsRow,
-    tcad,
     match,
+    profile,
   };
+}
+
+async function resolveUnifiedSubject(
+  input: UnifiedComparablesInput,
+): Promise<ResolvedSubject> {
+  const profile = await loadSubjectProfile(input);
+  const { mlsRow, match } = resolveMlsRowForProfile(profile);
+  return buildSubjectFromProfile(profile, mlsRow, match);
 }
 
 export async function fetchUnifiedComparables(
@@ -269,7 +255,7 @@ export async function fetchUnifiedComparables(
       : undefined;
 
   const excludeListingKey = subject.mlsRow?.listing_key;
-  const excludePropId = subject.tcad?.propId ?? undefined;
+  const excludePropId = subject.profile.identifiers.propId ?? undefined;
 
   const db = openDefaultMlsDb();
   let closedRows: Array<PropertyRow & { distance_miles: number }>;
@@ -304,15 +290,43 @@ export async function fetchUnifiedComparables(
     bathrooms: subject.bathrooms,
   };
 
-  const closedSales = buildCompSection(
+  const enrichmentCtx = {
+    latitude: subject.latitude,
+    longitude: subject.longitude,
+    radiusMiles,
+  };
+
+  const closedRaw = mapMlsRowsToComps(
+    closedRows,
     "sale_comp",
-    mapMlsRowsToComps(closedRows, "sale_comp", matchSubject, radiusMiles),
+    matchSubject,
+    radiusMiles,
+  );
+  const openRaw = mapMlsRowsToComps(
+    openRows,
+    "listing_comp",
+    matchSubject,
     radiusMiles,
   );
 
+  const enriched = await enrichMlsCompsWithTcad(
+    [...closedRaw, ...openRaw],
+    enrichmentCtx,
+  );
+  const enrichedByKey = new Map(
+    enriched.map((c) => [c.listingKey ?? c.address, c]),
+  );
+  const pick = (c: CompRecordDto) =>
+    enrichedByKey.get(c.listingKey ?? c.address) ?? c;
+
+  const closedComps = closedRaw.map(pick);
+  const openComps = openRaw.map(pick);
+
+  const closedSales = buildCompSection("sale_comp", closedComps, radiusMiles);
+
   const openListings = buildCompSection(
     "listing_comp",
-    mapMlsRowsToComps(openRows, "listing_comp", matchSubject, radiusMiles),
+    openComps,
     radiusMiles,
   );
 
@@ -358,14 +372,17 @@ export async function fetchUnifiedComparables(
       includeTcad,
     },
     subject: subject.mls,
-    subjectTcad: subject.tcad
+    subjectTcad: subject.profile.identifiers.propId
       ? {
-          propId: subject.tcad.propId,
-          situsAddress: subject.tcad.situsAddress,
-          latitude: subject.tcad.latitude,
-          longitude: subject.tcad.longitude,
+          propId: subject.profile.identifiers.propId,
+          situsAddress:
+            subject.profile.identifiers.addressLine ??
+            subject.profile.identifiers.address,
+          latitude: subject.profile.location.latitude,
+          longitude: subject.profile.location.longitude,
         }
       : null,
+    subjectProfile: subject.profile,
     sections: {
       closedSales,
       openListings,

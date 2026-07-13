@@ -13,6 +13,7 @@ export function toTcadPropertyDto(
   attrs: TcadArcGisAttributes,
   fetchedAt: string,
   centroid: TcadParcelCentroid | null = null,
+  source: TcadPropertyDto["source"] = "tcad-arcgis",
 ): TcadPropertyDto {
   return {
     propId: attrs.PROP_ID,
@@ -30,7 +31,7 @@ export function toTcadPropertyDto(
     tcadAcres: attrs.tcad_acres ?? null,
     gisAcres: attrs.GIS_acres ?? null,
     deedDate: formatDeedDate(attrs.deed_date),
-    source: "tcad-arcgis",
+    source,
     fetchedAt,
   };
 }

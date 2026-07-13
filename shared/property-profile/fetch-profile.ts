@@ -3,11 +3,13 @@ import type { PropertyDetailDto } from "../comparables/types";
 import {
   openDefaultMlsDb,
   resolvePropertyByAddress,
-} from "../../scripts/mls-db";
+} from "../mls/sqlite";
 import {
   fetchTcadAddressLookupOutcome,
   fetchTcadPropertyByPropId,
+  TcadApiError,
 } from "../tcad/client";
+import { findCrosswalkLinksByListingKey } from "../tcad/crosswalk";
 import type { TcadPropertyDto } from "../tcad/types";
 import {
   composePropertyProfile,
@@ -83,15 +85,13 @@ function tcadCandidatesFromDtos(
   return dtos.map((tcad) => tcadPropertyToTaxCandidate(tcad));
 }
 
-function mlsHasCoordinates(mls: PropertyDetailDto | null | undefined): boolean {
-  return mls?.latitude != null && mls?.longitude != null;
-}
-
 /**
  * Enrich a subject from TCAD and/or MLS SQLite.
  *
  * Linking priority: `propId` for TCAD when provided, else `address`.
  * MLS resolves by explicit `address`, or TCAD situs when only `propId` is given.
+ * TCAD is always attempted for tax values (assessed/appraised/market), even when
+ * MLS already supplies coordinates — location still prefers MLS in compose.
  * Multiple TCAD tax records surface in `taxCandidates` instead of silent null.
  */
 export async function fetchPropertyProfile(
@@ -133,18 +133,47 @@ export async function fetchPropertyProfile(
     tcadMatch = tcad
       ? buildTcadMatch("single")
       : buildTcadMatch("not_found", "No TCAD property found for that propId");
-  } else if (address) {
-    if (mlsHasCoordinates(mls)) {
-      tcadMatch = buildTcadMatch(
-        "none",
-        "TCAD skipped — MLS listing has coordinates",
-      );
-    } else {
-      let tcadQuery = address;
-      if (mls?.postalCode && !address.includes(mls.postalCode)) {
-        tcadQuery = `${address} ${mls.postalCode}`;
+  } else if (mls?.listingKey) {
+    try {
+      const crosswalk = await findCrosswalkLinksByListingKey(mls.listingKey);
+      if (crosswalk.length === 1) {
+        tcad = await fetchTcadPropertyByPropId(crosswalk[0]!.propId);
+        tcadMatch = tcad
+          ? buildTcadMatch("single")
+          : buildTcadMatch(
+              "not_found",
+              "Crosswalk prop_id not found in TCAD cache",
+            );
+      } else if (crosswalk.length > 1) {
+        const dtos = await Promise.all(
+          crosswalk.map((link) => fetchTcadPropertyByPropId(link.propId)),
+        );
+        const candidates = dtos.filter((d): d is TcadPropertyDto => d != null);
+        if (candidates.length > 0) {
+          taxCandidates = tcadCandidatesFromDtos(candidates);
+          tcadMatch = buildTcadMatch(
+            "ambiguous",
+            "Multiple TCAD tax records linked to this MLS listing; choose a propId from taxCandidates",
+          );
+        } else {
+          tcadMatch = buildTcadMatch(
+            "not_found",
+            "Crosswalk links found but TCAD parcels missing from cache",
+          );
+        }
       }
+    } catch {
+      // Crosswalk optional — continue with address lookup.
+    }
+  }
 
+  if (propId == null && !tcad && !(taxCandidates?.length ?? 0) && address) {
+    let tcadQuery = address;
+    if (mls?.postalCode && !address.includes(mls.postalCode)) {
+      tcadQuery = `${address} ${mls.postalCode}`;
+    }
+
+    try {
       const outcome = await fetchTcadAddressLookupOutcome(tcadQuery);
       if (outcome.status === "single" && outcome.property) {
         tcad = outcome.property;
@@ -160,6 +189,16 @@ export async function fetchPropertyProfile(
           "not_found",
           "No TCAD property found for that address",
         );
+      }
+    } catch (err) {
+      // MLS alone is enough for profile/flip; don't fail the request on ArcGIS errors.
+      if (mls && err instanceof TcadApiError) {
+        tcadMatch = buildTcadMatch(
+          "not_found",
+          `TCAD lookup failed: ${err.message}`,
+        );
+      } else {
+        throw err;
       }
     }
   }
