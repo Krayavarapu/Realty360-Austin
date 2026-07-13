@@ -448,6 +448,20 @@ export async function fetchTcadAddressLookupOutcome(
 }
 
 /**
+ * Cache-only address lookup (Neon `tcad_parcels`). No live ArcGIS fallback.
+ * Used by `pnpm seed:crosswalk` to avoid hammering upstream during batch builds.
+ */
+export async function fetchTcadAddressLookupOutcomeFromCache(
+  rawAddress: string,
+): Promise<TcadAddressLookupOutcome> {
+  const query = normalizeTcadAddressInput(rawAddress);
+  if (query.length < 3) return emptyAddressOutcome(query);
+
+  const cached = await resolveTcadAddressLookupFromCache(rawAddress, query);
+  return cached ?? emptyAddressOutcome(query);
+}
+
+/**
  * Fuzzy situs-address lookup. Tolerates double spaces and missing spaces
  * (e.g. "13903 FM812 RD" matches "13903 F M 812 RD 78617").
  */

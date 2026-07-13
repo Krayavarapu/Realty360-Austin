@@ -53,7 +53,7 @@ export function drawPageFooter(doc: PdfDoc, pageNum: number): void {
     .font(FONTS.regular)
     .fontSize(TYPE.caption)
     .fillColor(COLORS.slate);
-  doc.text(pdfSafeText("Realty360 Austin - Architecture Report v1.3"), PAGE.margin, y - 4, {
+  doc.text(pdfSafeText("Realty360 Austin - Architecture Report v1.4"), PAGE.margin, y - 4, {
     width: contentWidth(doc) / 2,
     align: "left",
   });

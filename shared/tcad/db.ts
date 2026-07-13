@@ -263,6 +263,25 @@ export async function findTcadParcelByPropId(
   return row ? parcelRowToDto(row) : null;
 }
 
+/** Batch prop_id lookup for MLS ↔ TCAD crosswalk enrichment. */
+export async function findTcadParcelsByPropIds(
+  propIds: number[],
+): Promise<Map<number, TcadPropertyDto>> {
+  const map = new Map<number, TcadPropertyDto>();
+  if (!isTcadCacheConfigured() || propIds.length === 0) return map;
+
+  await ensureTcadSchema();
+  const unique = Array.from(new Set(propIds));
+  const result = await getTcadPool().query<TcadParcelRow>(
+    "SELECT * FROM tcad_parcels WHERE prop_id = ANY($1::int[])",
+    [unique],
+  );
+  for (const row of result.rows) {
+    map.set(row.prop_id, parcelRowToDto(row));
+  }
+  return map;
+}
+
 /**
  * Candidate parcels for address scoring (mirrors ArcGIS situs_num + LIKE filters).
  */

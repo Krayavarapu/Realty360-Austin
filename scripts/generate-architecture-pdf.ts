@@ -109,7 +109,7 @@ function renderBlocks(doc: PdfDoc, blocks: ContentBlock[]): void {
           drawCallout(
             doc,
             block.text +
-              " — Version 1.3 for Austin / Travis County. See following sections for system design and data flows.",
+              " — Version 1.4 for Austin / Travis County. See following sections for system design and data flows.",
             "note",
           );
         }

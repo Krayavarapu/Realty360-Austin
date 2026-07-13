@@ -50,13 +50,13 @@ export function drawCoverPage(doc: PDFKit.PDFDocument): void {
     .font(FONTS.bold)
     .fontSize(10)
     .fillColor(COLORS.navy)
-    .text("Version 1.3", 56, badgeY + 7, { width: 88, align: "center" });
+    .text("Version 1.4", 56, badgeY + 7, { width: 88, align: "center" });
 
   doc
     .font(FONTS.regular)
     .fontSize(TYPE.body)
     .fillColor(COLORS.textMuted)
-    .text(pdfSafeText("July 7, 2026  |  Austin / Travis County, TX"), 156, badgeY + 8);
+    .text(pdfSafeText("July 13, 2026  |  Austin / Travis County, TX"), 156, badgeY + 8);
 
   // Feature pills
   const pills = [

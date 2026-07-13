@@ -5,6 +5,13 @@ import {
   scoreTcadAddressMatch,
   streetNameLikeToken,
 } from "../tcad/address-query";
+import {
+  findCrosswalkLinksByListingKey,
+  findCrosswalkLinksByListingKeys,
+  isCrosswalkConfigured,
+  type MlsTcadCrosswalkLink,
+} from "../tcad/crosswalk";
+import { findTcadParcelsByPropIds } from "../tcad/db";
 import { fetchTcadParcelsForCompEnrichment } from "../tcad/client";
 import { pickTaxValue } from "../tcad/tax-value";
 import type { TcadPropertyDto } from "../tcad/types";
@@ -157,9 +164,25 @@ async function loadEnrichmentIndex(
   return buildTcadEnrichmentIndex(parcels);
 }
 
+function matchTcadForComp(
+  comp: CompRecordDto,
+  index: TcadEnrichmentIndex,
+  crosswalkParcels: Map<number, TcadPropertyDto>,
+  crosswalkLinks: Map<string, MlsTcadCrosswalkLink[]>,
+): TcadPropertyDto | null {
+  if (comp.listingKey) {
+    const links = crosswalkLinks.get(comp.listingKey);
+    if (links?.length === 1) {
+      const tcad = crosswalkParcels.get(links[0]!.propId);
+      if (tcad) return tcad;
+    }
+  }
+  return matchTcadByAddress(comp, index);
+}
+
 /**
- * Attach TCAD tax fields to MLS sale/listing comps when a TCAD situs address
- * matches the MLS comp address. No nearest-parcel or coordinate fallback.
+ * Attach TCAD tax fields to MLS sale/listing comps.
+ * Priority: precomputed crosswalk (single link) → situs address match in radius index.
  */
 export async function enrichMlsCompsWithTcad(
   comps: CompRecordDto[],
@@ -179,9 +202,29 @@ export async function enrichMlsCompsWithTcad(
 
   if (index.parcels.length === 0) return comps;
 
+  let crosswalkLinks = new Map<string, MlsTcadCrosswalkLink[]>();
+  let crosswalkParcels = new Map<number, TcadPropertyDto>();
+
+  if (isCrosswalkConfigured()) {
+    const listingKeys = mlsComps
+      .map((c) => c.listingKey)
+      .filter((k): k is string => Boolean(k));
+    try {
+      crosswalkLinks = await findCrosswalkLinksByListingKeys(listingKeys);
+      const propIds = Array.from(crosswalkLinks.values())
+        .filter((links) => links.length === 1)
+        .map((links) => links[0]!.propId);
+      if (propIds.length > 0) {
+        crosswalkParcels = await findTcadParcelsByPropIds(propIds);
+      }
+    } catch {
+      // Crosswalk optional — fall back to address matching only.
+    }
+  }
+
   const enrichedByKey = new Map<string, CompRecordDto>();
   for (const comp of mlsComps) {
-    const tcad = matchTcadByAddress(comp, index);
+    const tcad = matchTcadForComp(comp, index, crosswalkParcels, crosswalkLinks);
     if (!tcad) continue;
     const key = comp.listingKey ?? comp.address;
     enrichedByKey.set(key, applyTcadToComp(comp, tcad));

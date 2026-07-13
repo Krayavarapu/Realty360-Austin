@@ -33,7 +33,7 @@ const DIAGRAM_AFTER_HEADING: Record<string, DiagramId> = {
   "### 4.2 TCAD (Travis Central Appraisal District)": "tcad-read",
   "### 8.2 Cost Stack": "flip-pipeline",
   "### 8.3 Viability Bands": "viability",
-  "### MLS ↔ TCAD coverage (July 2026 audit)": "coverage",
+  "### MLS ↔ TCAD coverage (July 2026)": "coverage",
 };
 
 function isAsciiDiagram(lines: string[]): boolean {

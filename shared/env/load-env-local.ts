@@ -1,11 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolveRepoRoot } from "./repo-root";
 
-const REPO_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../..",
-);
+const REPO_ROOT = resolveRepoRoot();
 
 /**
  * Loads `.env.local` from the repo root into `process.env` (does not override

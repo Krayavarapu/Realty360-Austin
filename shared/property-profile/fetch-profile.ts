@@ -9,6 +9,7 @@ import {
   fetchTcadPropertyByPropId,
   TcadApiError,
 } from "../tcad/client";
+import { findCrosswalkLinksByListingKey } from "../tcad/crosswalk";
 import type { TcadPropertyDto } from "../tcad/types";
 import {
   composePropertyProfile,
@@ -132,7 +133,41 @@ export async function fetchPropertyProfile(
     tcadMatch = tcad
       ? buildTcadMatch("single")
       : buildTcadMatch("not_found", "No TCAD property found for that propId");
-  } else if (address) {
+  } else if (mls?.listingKey) {
+    try {
+      const crosswalk = await findCrosswalkLinksByListingKey(mls.listingKey);
+      if (crosswalk.length === 1) {
+        tcad = await fetchTcadPropertyByPropId(crosswalk[0]!.propId);
+        tcadMatch = tcad
+          ? buildTcadMatch("single")
+          : buildTcadMatch(
+              "not_found",
+              "Crosswalk prop_id not found in TCAD cache",
+            );
+      } else if (crosswalk.length > 1) {
+        const dtos = await Promise.all(
+          crosswalk.map((link) => fetchTcadPropertyByPropId(link.propId)),
+        );
+        const candidates = dtos.filter((d): d is TcadPropertyDto => d != null);
+        if (candidates.length > 0) {
+          taxCandidates = tcadCandidatesFromDtos(candidates);
+          tcadMatch = buildTcadMatch(
+            "ambiguous",
+            "Multiple TCAD tax records linked to this MLS listing; choose a propId from taxCandidates",
+          );
+        } else {
+          tcadMatch = buildTcadMatch(
+            "not_found",
+            "Crosswalk links found but TCAD parcels missing from cache",
+          );
+        }
+      }
+    } catch {
+      // Crosswalk optional — continue with address lookup.
+    }
+  }
+
+  if (propId == null && !tcad && !(taxCandidates?.length ?? 0) && address) {
     let tcadQuery = address;
     if (mls?.postalCode && !address.includes(mls.postalCode)) {
       tcadQuery = `${address} ${mls.postalCode}`;

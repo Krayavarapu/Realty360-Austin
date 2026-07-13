@@ -1,8 +1,8 @@
 # Realty360 Austin — Application Architecture Report
 
-**Version:** 1.3 · **Generated:** July 7, 2026 · **Market:** Austin / Travis County, TX
+**Version:** 1.4 · **Generated:** July 13, 2026 · **Market:** Austin / Travis County, TX
 
-This document describes what the application does today, how data flows through the system, key design decisions, and the planned evolution path. It reflects the codebase as of the `feature/tax-data-pipeline` branch (MLS SQLite cache, TCAD Neon Postgres cache, profile cache, multi-parcel TCAD handling, MLS+TCAD comp enrichment, rules-based flip engine).
+This document describes what the application does today, how data flows through the system, key design decisions, and the planned evolution path. It reflects the codebase as of the `feature/tax-data-pipeline` branch (MLS SQLite cache, TCAD Neon Postgres cache, MLS↔TCAD crosswalk, profile cache, multi-parcel TCAD handling, strict comp tax enrichment, rules-based flip engine).
 
 ---
 
@@ -31,11 +31,12 @@ This document describes what the application does today, how data flows through 
 - **TCAD tax parcel data** (assessed/appraised values, parcel centroids)
 - **Unified comparables search** (closed sales, active listings, optional tax-reference parcels; MLS comps enriched with TCAD tax fields)
 - **Property profile composition** with in-process cache and multi-parcel TCAD (`taxCandidates`)
+- **MLS ↔ TCAD crosswalk** (precomputed `listing_key` ↔ `prop_id` in Neon)
 - **Post-flip deal analysis** (ARV from comps, rehab tiers, hold/financing costs with Policy B multi-parcel tax, margin viability)
 
 The app is built as **Vite + React** (client) and **Express** (API), with shared TypeScript logic in `shared/`. Production serves a single Node process; development runs Vite on port 3000 proxying `/api` to Express on 3001.
 
-**What it is not (yet):** a production MLS Grid proxy for the browser, a machine-learning ARV model, or a forced MLS↔TCAD crosswalk. Those are documented future phases.
+**What it is not (yet):** a production MLS Grid proxy for the browser, a machine-learning ARV model, or full ACTRIS MLS history in the local seed.
 
 ---
 
@@ -59,10 +60,12 @@ The app is built as **Vite + React** (client) and **Express** (API), with shared
 ┌───────────────┐  ┌──────────────┐      ┌──────────────────┐
 │ data/mls.sqlite│  │ Neon Postgres │      │ Travis County    │
 │ (MLS cache)    │  │ tcad_parcels  │      │ ArcGIS (live)    │
+│                │  │ mls_tcad_     │      │                  │
+│                │  │ crosswalk     │      │                  │
 └───────────────┘  └──────────────┘      └──────────────────┘
         ▲                 ▲                      ▲
         │                 │                      │
-   pnpm seed:mls     pnpm seed:tcad         fallback reads
+   pnpm seed:mls   seed:tcad + seed:crosswalk   fallback reads
 ```
 
 ### 2.2 Request Path (Development)
@@ -88,7 +91,7 @@ Business rules live in `shared/` so the same comp-matching, flip math, TCAD addr
 | `shared/` | Domain logic: MLS, TCAD, comparables, property-profile, flip |
 | `shared/env/load-env-local.ts` | Loads `.env.local` for Node scripts and Express |
 | `shared/mls/sqlite.ts` | MLS SQLite schema and query helpers (runtime) |
-| `scripts/` | Seed jobs (`seed-mls`, `seed-tcad`), `smoke-flip`, architecture PDF |
+| `scripts/` | Seed jobs (`seed-mls`, `seed-tcad`, `seed-crosswalk`), `smoke-flip`, architecture PDF |
 | `data/` | Gitignored runtime data (`mls.sqlite`, raw JSON dumps) |
 | `docs/` | Roadmap and architecture documentation |
 
@@ -121,9 +124,21 @@ Business rules live in `shared/` so the same comp-matching, flip math, TCAD addr
 
 **Fields cached:** `PROP_ID`, geo_id, situs address, tax values (appraised, market, assessed), acres, WGS-84 centroid.
 
-### 4.3 Data Independence Principle
+### 4.3 MLS ↔ TCAD Crosswalk
 
-MLS and TCAD are **intentionally separate**. There is no required `listing_key` ↔ `prop_id` crosswalk in v1. Profiles compose both sources at request time when possible; partial profiles are valid.
+| Aspect | Detail |
+|--------|--------|
+| **Store** | Neon Postgres table `mls_tcad_crosswalk` (same `DATABASE_URL` as TCAD) |
+| **Seed command** | `pnpm seed:crosswalk` (after `seed:mls` + `seed:tcad`); `--fresh` truncates |
+| **Row shape** | `listing_key`, `prop_id`, `address_norm`, `match_method`, `match_score` |
+| **Build logic** | Cache-only TCAD address lookup per MLS listing; single + ambiguous outcomes stored |
+| **Runtime** | Comp enrichment and property profile resolve TCAD via crosswalk before address scoring |
+
+**Current seed stats (6,143 listings):** 1,757 distinct listings linked (~29%); 1,919 total rows (includes multi-parcel ambiguous).
+
+### 4.4 Data Independence Principle
+
+MLS and TCAD remain **separate upstream sources**. The crosswalk is a precomputed optimization layer — not all MLS addresses link to a TCAD situs (~71% still `not_found` after address matching).
 
 ---
 
@@ -142,16 +157,16 @@ MLS and TCAD are **intentionally separate**. There is no required `listing_key` 
 
 **Subject card:** shows TCAD tax value, acres, deed date when single match; lists all `taxCandidates` with combined tax when ambiguous; optional parcel picker re-runs search with `propId`.
 
-**TCAD enrichment (closed + open comps):** one Postgres radius prefetch per search (`findTcadParcelsInRadiusBBox`), then in-memory address scoring and street-aware nearest-parcel fallback. Coords for matching prefer MLS lat/lon; TCAD centroid fills gaps. UI citation: `MLS + TCAD` when enriched.
+**TCAD enrichment (closed + open comps):** batch crosswalk lookup by `listing_key` (single link only), then strict situs address match against one radius prefetch (`findTcadParcelsInRadiusBBox`). Tax fields attach only when a real TCAD parcel matches — no nearest-parcel coordinate fallback. UI citation: `MLS + TCAD` when enriched.
 
 Comps are bucketed into exclusive mile rings (0–0.5, 0.5–1, 1–2 mi, …) with match % from beds/baths/distance.
 
 ### 5.2 Property Profile
 
 1. `GET /api/property/profile?address=` or `?propId=` (or both)
-2. `fetchPropertyProfile()` / `fetchPropertyProfileCached()` loads MLS by address and TCAD by address or propId.
-3. `composePropertyProfile()` merges identifiers, physical, MLS sale, tax, location.
-4. TCAD is always attempted for tax data even when MLS supplies coordinates.
+2. `fetchPropertyProfile()` / `fetchPropertyProfileCached()` loads MLS by address.
+3. **TCAD linking priority:** user `propId` → MLS `listing_key` crosswalk → address lookup (cache → ArcGIS).
+4. `composePropertyProfile()` merges identifiers, physical, MLS sale, tax, location.
 5. **Single TCAD match** → `tax` set, `tcadMatch.status: "single"`.
 6. **Ambiguous TCAD match** → `tax: null`, `taxCandidates[]`, `tcadMatch.status: "ambiguous"` (e.g. duplex — multiple `prop_id` at same situs).
 7. **No TCAD match** → MLS-only profile, `tcadMatch.status: "not_found"`; comparables and flip continue without tax fields.
@@ -205,18 +220,19 @@ All routes are mounted in `server/app.ts`.
 - ArcGIS client with retry/timeout
 - Address fuzzy matching (`address-query.ts`)
 - Postgres cache (`db.ts`)
+- **MLS ↔ TCAD crosswalk** (`crosswalk.ts`)
 - Parcel centroids from polygon geometry
 
 ### 7.3 `shared/comparables/`
 
 - `match-score.ts` — mile rings, match %, distance score
 - `comp-record.ts` — unified `CompRecordDto` with `source`, `compRole`, `taxValue`, `tcadAcres`
-- `tcad-enrichment.ts` — batch TCAD prefetch + in-memory match for MLS sale/listing comps
+- `tcad-enrichment.ts` — crosswalk batch lookup + strict situs address match for MLS sale/listing comps
 - `unified-search.ts` — orchestrates MLS + TCAD comp sections and enrichment
 
 ### 7.4 `shared/property-profile/`
 
-- `fetch-profile.ts` — enrichment orchestration (MLS + TCAD, ambiguous handling)
+- `fetch-profile.ts` — enrichment orchestration (MLS + crosswalk + TCAD, ambiguous handling)
 - `compose.ts` — merges partial MLS/TCAD into `PropertyProfileDto`
 - `profile-cache.ts` — in-process TTL cache keyed by address and/or `propId`
 - `tcad-tax.ts` — `pickProfileTaxValue`, `taxHoldBasisFromProfile` (Policy B sum for multi-parcel)
@@ -281,13 +297,14 @@ Override: request body `arv` → manual mode.
 | **MLS in SQLite, not live API** | Fast radius queries; avoids MLS Grid rate limits on every request |
 | **TCAD in Postgres (Neon)** | ~373k parcels; eliminates per-request ArcGIS latency; one bbox query per comp search |
 | **Cache-first TCAD with ArcGIS fallback** | Works before seed completes; resilient to cache gaps; `source: tcad-cache \| tcad-arcgis` on DTOs |
-| **MLS comp TCAD enrichment** | Sale/listing comps show unified tax fields without merging TCAD into ARV math |
+| **MLS comp TCAD enrichment** | Crosswalk first (fast); strict situs match fallback; tax only when TCAD parcel exists |
 | **Profile cache (30 min TTL)** | Comparables warms profile; flip reuses without duplicate TCAD/MLS fetches |
 | **Multi-parcel Policy B** | Duplex/multi-`prop_id` situs: hold tax sums all candidate assessed values; UI lists each parcel |
 | **MLS-only fallback** | TCAD `not_found` → valid MLS profile; hold tax uses purchase price |
+| **MLS ↔ TCAD crosswalk** | Precomputed `listing_key` ↔ `prop_id` in Neon; ~29% of seeded listings linked |
+| **No nearest-parcel comp tax** | Avoids false tax on MLS marketing addresses (e.g. ROW parcels, Tournament/Tourney mismatches) |
 | **MLS-style address scoring** | City/state stripped from TCAD situs match so profile + flip resolve full formatted addresses |
-| **Batch comp enrichment** | Single radius prefetch + in-memory index (not N DB round-trips per comp) |
-| **No forced MLS↔TCAD link in v1** | Address matching is messy; partial profiles OK; crosswalk is Phase 5 optional |
+| **Batch comp enrichment** | One radius prefetch + crosswalk prop_id batch fetch (not N fuzzy matches per comp) |
 | **TCAD tax comps are reference only** | Appraised ≠ market sale price; prevents misleading ARV |
 | **Rules engine before ML** | Auditable math; same API contract for future Python model |
 | **Shared TypeScript domain layer** | One source of truth for comps, flip, and profile logic |
@@ -302,6 +319,7 @@ Override: request body `arv` → manual mode.
 pnpm install
 pnpm seed:mls              # MLS closed + active/pending → data/mls.sqlite
 pnpm seed:tcad             # Full county → Neon tcad_parcels
+pnpm seed:crosswalk        # MLS listing_key ↔ TCAD prop_id → Neon mls_tcad_crosswalk
 pnpm dev:api               # API :3001
 pnpm dev                   # UI :3000
 pnpm smoke:flip            # API/engine regression checks
@@ -318,7 +336,7 @@ pnpm build && pnpm start   # Production-style single server
 
 ## 11. Roadmap & Gaps
 
-### Completed (Phases 1–4 + TCAD platform)
+### Completed (Phases 1–5.3)
 
 - MLS schema extensions, mile-bucket comps, unified comparables API
 - Property profile composition, TCAD propId/address APIs, **profile cache**, **multi-parcel `taxCandidates`**
@@ -326,13 +344,16 @@ pnpm build && pnpm start   # Production-style single server
 - Flip rules engine v0, flip UI on comparables landing (`FlipPredictionResults`)
 - **Policy B hold tax** (`taxHoldBasisFromProfile` — sum assessed for ambiguous parcels)
 - TCAD Neon ETL (`pnpm seed:tcad`, ~373k parcels), cache-first reads (`shared/tcad/db.ts`)
-- MLS sale/listing comp enrichment with TCAD tax value + acres (`tcad-enrichment.ts`)
+- **MLS ↔ TCAD crosswalk** (`pnpm seed:crosswalk`, `mls_tcad_crosswalk`, runtime in `crosswalk.ts`)
+- MLS sale/listing comp enrichment — crosswalk + strict address match (`tcad-enrichment.ts`)
 - MLS-style TCAD address matching (city/state excluded from scoring)
 - Flip smoke tests (`pnpm smoke:flip`)
+- Legacy `GET /api/properties/by-radius` deprecated (use `/api/comparables/unified`)
+- Project cleanup: runtime code in `shared/`, pruned unused UI components and dead client routes
 
-### MLS ↔ TCAD coverage (July 2026 audit)
+### MLS ↔ TCAD coverage (July 2026)
 
-Of **6,139** distinct MLS addresses crosswalked against `tcad_parcels`:
+**Address lookup** (6,139 distinct MLS addresses):
 
 | Outcome | Count |
 |---------|------:|
@@ -340,29 +361,35 @@ Of **6,139** distinct MLS addresses crosswalked against `tcad_parcels`:
 | No TCAD match (MLS-only) | 4,539 |
 | Ambiguous (multi-parcel) | 27 |
 
-Example multi-parcel test: `1613 W Braker Ln #B, Austin, TX 78758` (2 TCAD parcels, same situs). Example MLS-only: `507 Hammack Dr` (MLS present; TCAD situs numbering gap 505→600 on Hammack).
+**Crosswalk table** (6,143 MLS listings seeded):
+
+| Outcome | Count |
+|---------|------:|
+| Single link | 1,716 |
+| Ambiguous listings | 41 |
+| Not found | 4,386 |
+| Distinct listings linked | 1,757 (~29%) |
+
+Example multi-parcel: `1613 W Braker Ln #B`. MLS-only examples: `507 Hammack Dr`, `34 Tournament Way`, `50 Tournament Way #I-52`.
 
 ### Planned
 
 | Item | Description |
 |------|-------------|
-| MLS → TCAD crosswalk | Precomputed `listing_key` ↔ `prop_id` links for faster comp joins |
 | Deal ledger | Labeled flips for ML training |
 | Python ML ARV model | Same `POST /api/predict/flip` contract |
 | `geoId` lookup | Alternate TCAD key |
-| Coordinate-based TCAD fallback | When address `not_found` but MLS lat/lon exists, match nearest parcel(s) in small radius |
-
-| Monthly TCAD refresh | Cron re-run `seed:tcad` |
+| Coordinate-based crosswalk seed | Link MLS lat/lon to TCAD parcel when situs address mismatches |
+| Monthly TCAD + crosswalk refresh | Cron re-run `seed:tcad` then `seed:crosswalk` |
 
 ### Known Limitations
 
 - MLS seed cap (~2k–5k rows configurable) — not full ACTRIS history
 - Non-Travis addresses have MLS data but no TCAD tax
-- **~74% of MLS addresses** have no TCAD situs match in current cache (address gaps, situs numbering mismatches)
-- **Multi-parcel ambiguous** is rare (~27 MLS addresses); most duplexes either score to one winner or have no TCAD situs
-- Condos/townhomes may lack unit-level TCAD situs — nearest same-street parcel used for comp enrichment
+- **~71% of MLS listings** have no TCAD crosswalk link (situs vs marketing address gaps, units, numbering)
+- **Multi-parcel ambiguous** is rare (~41 listings in crosswalk seed)
+- Condos/townhomes often lack unit-level TCAD situs — no tax on comp unless situs matches
 - Flip ARV requires sufficient similar closed comps in radius
-- Home page calculator may still use embedded constants if MLS token unset
 
 ---
 
@@ -455,12 +482,14 @@ GET /api/comparables/unified
         ├─ ONE fetch: findTcadParcelsInRadiusBBox (Neon)
         │     └─ build street-number index in memory
         │
-        ├─ per MLS comp:
-        │     ├─ address score (TCAD situs)
-        │     └─ else nearest parcel (same street, within 0.15 mi)
+        ├─ BATCH: mls_tcad_crosswalk by listing_key
+        │     └─ single link → tcad_parcels by prop_id
         │
-        └─ CompRecordDto with taxValue, tcadAcres, propId
-              └─ UI: Source MLS + TCAD
+        ├─ per MLS comp (no crosswalk hit):
+        │     └─ strict situs address match (same street number required)
+        │
+        └─ CompRecordDto with taxValue, tcadAcres, propId when matched
+              └─ UI: Source MLS + TCAD (else MLS only)
 ```
 
 ### 12.6 Multi-Parcel TCAD Flow

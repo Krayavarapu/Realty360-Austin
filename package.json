@@ -12,6 +12,7 @@
     "check": "tsc --noEmit",
     "seed:mls": "tsx scripts/seed-mls.ts",
     "seed:tcad": "tsx scripts/seed-tcad.ts",
+    "seed:crosswalk": "tsx scripts/seed-crosswalk.ts",
     "docs:architecture-pdf": "tsx scripts/generate-architecture-pdf.ts",
     "smoke:flip": "tsx scripts/smoke-flip.ts",
     "format": "prettier --write ."
