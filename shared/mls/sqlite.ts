@@ -9,6 +9,7 @@ import {
 } from "./address-query";
 import { OPEN_LISTING_STATUSES } from "./constants";
 import { resolveMlsDbPath } from "./db-path";
+import { isSingleFamilyPropertyRow } from "./single-family";
 import type { CleanProperty } from "./transform";
 import { normalizeAddress } from "./transform";
 
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS properties (
   longitude         REAL,
   standard_status   TEXT,
   property_type     TEXT,
+  property_subtype  TEXT,
   bedrooms          INTEGER,
   bathrooms         REAL,
   living_area_sqft  INTEGER,
@@ -61,6 +63,7 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<readonly [string, string]> = [
   ["garage_spaces", "INTEGER"],
   ["lot_size_acres", "REAL"],
   ["property_condition", "TEXT"],
+  ["property_subtype", "TEXT"],
 ];
 
 function ensureSchemaMigrations(db: MlsDatabase): void {
@@ -94,14 +97,14 @@ const UPSERT = `
 INSERT INTO properties (
   listing_key, listing_id, address_line, address_norm,
   street_number, street_name, street_suffix, city, postal_code, state,
-  latitude, longitude, standard_status, property_type,
+  latitude, longitude, standard_status, property_type, property_subtype,
   bedrooms, bathrooms, living_area_sqft, list_price, close_price, close_date,
   year_built, days_on_market, has_pool, garage_spaces, lot_size_acres,
   property_condition, updated_at
 ) VALUES (
   @listing_key, @listing_id, @address_line, @address_norm,
   @street_number, @street_name, @street_suffix, @city, @postal_code, @state,
-  @latitude, @longitude, @standard_status, @property_type,
+  @latitude, @longitude, @standard_status, @property_type, @property_subtype,
   @bedrooms, @bathrooms, @living_area_sqft, @list_price, @close_price, @close_date,
   @year_built, @days_on_market, @has_pool, @garage_spaces, @lot_size_acres,
   @property_condition, datetime('now')
@@ -120,6 +123,7 @@ ON CONFLICT(listing_key) DO UPDATE SET
   longitude = excluded.longitude,
   standard_status = excluded.standard_status,
   property_type = excluded.property_type,
+  property_subtype = excluded.property_subtype,
   bedrooms = excluded.bedrooms,
   bathrooms = excluded.bathrooms,
   living_area_sqft = excluded.living_area_sqft,
@@ -179,7 +183,7 @@ const SELECT_PROPERTY = `
 SELECT
   listing_key, listing_id, address_line, address_norm,
   street_number, street_name, street_suffix, city, postal_code, state,
-  latitude, longitude, standard_status, property_type,
+  latitude, longitude, standard_status, property_type, property_subtype,
   bedrooms, bathrooms, living_area_sqft, list_price, close_price, close_date,
   year_built, days_on_market, has_pool, garage_spaces, lot_size_acres,
   property_condition, updated_at
@@ -565,6 +569,7 @@ export function findPropertiesWithinRadius(
       ),
     }))
     .filter((row) => row.distance_miles <= radiusMiles)
+    .filter((row) => isSingleFamilyPropertyRow(row))
     .sort((a, b) => a.distance_miles - b.distance_miles)
     .slice(0, limit);
 }
@@ -638,6 +643,7 @@ export function findActiveListingsWithinRadius(
       ),
     }))
     .filter((row) => row.distance_miles <= radiusMiles)
+    .filter((row) => isSingleFamilyPropertyRow(row))
     .sort((a, b) => a.distance_miles - b.distance_miles)
     .slice(0, limit);
 }
