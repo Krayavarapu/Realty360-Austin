@@ -12,7 +12,7 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-export function propertyProfileCacheKey(
+function propertyProfileCacheKey(
   input: FetchPropertyProfileInput,
 ): string | null {
   const propId = input.propId ?? null;
@@ -28,9 +28,7 @@ export function propertyProfileCacheKey(
   return null;
 }
 
-export function getCachedPropertyProfile(
-  key: string,
-): PropertyProfileDto | null {
+function getCachedPropertyProfile(key: string): PropertyProfileDto | null {
   const entry = cache.get(key);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {
@@ -40,17 +38,12 @@ export function getCachedPropertyProfile(
   return entry.profile;
 }
 
-export function setCachedPropertyProfile(
+function setCachedPropertyProfile(
   key: string,
   profile: PropertyProfileDto,
   ttlMs: number = DEFAULT_TTL_MS,
 ): void {
   cache.set(key, { profile, expiresAt: Date.now() + ttlMs });
-}
-
-/** Clear in-process cache (tests). */
-export function clearPropertyProfileCache(): void {
-  cache.clear();
 }
 
 /**

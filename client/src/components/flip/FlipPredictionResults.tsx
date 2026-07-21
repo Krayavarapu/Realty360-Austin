@@ -6,6 +6,7 @@ import type {
   FlipViability,
 } from "@shared/flip/prediction-types";
 import { getRehabTierConfig } from "@shared/flip/config";
+import { formatDistanceMiles } from "@shared/comparables/format";
 import { DataSourceCitation } from "@/components/DataSourceCitation";
 import {
   flipSubjectDataSource,
@@ -82,7 +83,7 @@ function ArvCompRow({ comp }: { comp: FlipArvCompRecord }) {
           <div className="font-mono text-muted-foreground mt-0.5">
             {comp.bedrooms}/{comp.bathrooms} bed/bath ·{" "}
             {comp.livingAreaSqft.toLocaleString()} sqft ·{" "}
-            {comp.distanceMiles.toFixed(2)} mi
+            {formatDistanceMiles(comp.distanceMiles)}
           </div>
         </div>
         <div className="text-right shrink-0 font-mono">

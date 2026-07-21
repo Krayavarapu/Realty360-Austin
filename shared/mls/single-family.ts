@@ -48,13 +48,6 @@ export function isAllowedCompSubtype(
   return ALLOWED_COMP_SUBTYPES.has(subtype.trim().toLowerCase());
 }
 
-/** @deprecated Prefer `isAllowedCompSubtype`. */
-export function isSingleFamilySubtype(
-  subtype: string | null | undefined,
-): boolean {
-  return isAllowedCompSubtype(subtype);
-}
-
 /**
  * Seed-time gate: single-family or townhouse only.
  * Reject unit-style addresses for SFR (often condo/duplex halves); allow them

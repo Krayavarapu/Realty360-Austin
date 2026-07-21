@@ -3,10 +3,7 @@ import type {
   UnifiedComparablesResponse,
 } from "@shared/comparables/types";
 
-export type {
-  PropertyDetailDto,
-  RadiusComparableDto,
-} from "@shared/comparables/types";
+export type { PropertyDetailDto } from "@shared/comparables/types";
 
 export interface AddressSuggestResponse {
   query: string;
@@ -79,12 +76,7 @@ export async function validatePropertyAddress(address: string): Promise<boolean>
   return false;
 }
 
-export type {
-  CompRecordDto,
-  CompRole,
-  CompSource,
-  UnifiedComparablesResponse,
-} from "@shared/comparables/types";
+export type { UnifiedComparablesResponse } from "@shared/comparables/types";
 
 export async function fetchUnifiedComparables(
   address: string,

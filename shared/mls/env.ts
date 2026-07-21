@@ -29,5 +29,3 @@ export function resolveMlsBaseUrl(): string {
     DEFAULT_BASE_URL
   );
 }
-
-export const MLS_DEFAULT_BASE_URL = DEFAULT_BASE_URL;
