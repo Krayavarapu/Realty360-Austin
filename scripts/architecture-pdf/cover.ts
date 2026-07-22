@@ -95,6 +95,8 @@ export function drawCoverPage(doc: PDFKit.PDFDocument): void {
     doc.text(item, 72, py + 66 + idx * 18);
   });
 
+  const savedBottom = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
   doc
     .font(FONTS.oblique)
     .fontSize(TYPE.caption)
@@ -104,9 +106,10 @@ export function drawCoverPage(doc: PDFKit.PDFDocument): void {
         "Generated from docs/ARCHITECTURE_REPORT.md | feature/tax-data-pipeline",
       ),
       56,
-      h - 56,
-      { width: w - 112, align: "center" },
+      h - 48,
+      { width: w - 112, align: "center", lineBreak: false },
     );
+  doc.page.margins.bottom = savedBottom;
 }
 
 export function drawTocPage(doc: PDFKit.PDFDocument, md: string): void {

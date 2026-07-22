@@ -8,8 +8,11 @@ export function contentWidth(doc: PdfDoc): number {
 }
 
 export function ensureSpace(doc: PdfDoc, height: number): void {
-  const bottom = doc.page.height - PAGE.margin - 24;
-  if (doc.y + height > bottom) doc.addPage();
+  const bottom = doc.page.height - PAGE.margin - 28;
+  const usable = bottom - PAGE.margin;
+  // Never try to reserve more than one page of height — callers must paginate.
+  const need = Math.min(height, usable);
+  if (doc.y + need > bottom) doc.addPage();
 }
 
 /**
@@ -44,6 +47,12 @@ export function stripMd(text: string): string {
 export function drawPageFooter(doc: PdfDoc, pageNum: number): void {
   const y = PAGE.footerY;
   const w = doc.page.width;
+  // Absolute footer drawing must not trigger PDFKit auto page-breaks
+  // (text below the bottom margin was creating dozens of blank pages).
+  const savedY = doc.y;
+  const savedBottom = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
+  doc.save();
   doc
     .strokeColor(COLORS.border)
     .moveTo(PAGE.margin, y - 12)
@@ -56,11 +65,16 @@ export function drawPageFooter(doc: PdfDoc, pageNum: number): void {
   doc.text(pdfSafeText("Realty360 Austin - Architecture Report v1.4"), PAGE.margin, y - 4, {
     width: contentWidth(doc) / 2,
     align: "left",
+    lineBreak: false,
   });
   doc.text(`Page ${pageNum}`, PAGE.margin, y - 4, {
     width: contentWidth(doc),
     align: "right",
+    lineBreak: false,
   });
+  doc.restore();
+  doc.page.margins.bottom = savedBottom;
+  doc.y = savedY;
 }
 
 export function drawSectionBanner(doc: PdfDoc, title: string): void {
@@ -177,12 +191,19 @@ export function drawTable(
     return maxH;
   });
 
-  ensureSpace(doc, heights.reduce((a, b) => a + b, 0) + 8);
-  let y = doc.y;
   const x0 = PAGE.margin;
+  let tableTop = doc.y;
+  let y = doc.y;
 
   rows.forEach((row, r) => {
     const rowH = heights[r]!;
+    ensureSpace(doc, rowH + 4);
+    // New page: reset table top for border stroke segments
+    if (doc.y < y - 1) {
+      tableTop = doc.y;
+    }
+    y = doc.y;
+
     const isHeader = r === 0;
     if (isHeader) {
       doc.roundedRect(x0, y, totalW, rowH, 3).fill(COLORS.navyMid);
@@ -199,15 +220,17 @@ export function drawTable(
         .text(stripMd(cell), x + padding, y + padding, {
           width: cw - padding * 2,
           lineGap: 1,
+          height: rowH - padding,
         });
       x += cw;
     });
     y += rowH;
+    doc.y = y;
   });
 
   doc
     .strokeColor(COLORS.border)
-    .rect(x0, doc.y, totalW, y - doc.y)
+    .rect(x0, tableTop, totalW, Math.max(0, y - tableTop))
     .stroke();
   doc.y = y + 10;
 }

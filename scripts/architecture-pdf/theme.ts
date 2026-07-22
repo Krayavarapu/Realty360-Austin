@@ -31,7 +31,8 @@ export const FONTS = {
 
 export const PAGE = {
   margin: 56,
-  footerY: 748,
+  /** Must stay above the bottom content margin (LETTER 792 - margin - 20 ≈ 716). */
+  footerY: 700,
 } as const;
 
 export const TYPE = {
