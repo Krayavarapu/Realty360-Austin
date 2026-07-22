@@ -1,5 +1,6 @@
 import type { RESOProperty } from "./types";
 import { derivePropertyCondition } from "./condition";
+import { isSingleFamilyResidence } from "./single-family";
 
 /** Row shape stored in `data/mls.sqlite` (`properties` table). */
 export interface CleanProperty {
@@ -17,6 +18,7 @@ export interface CleanProperty {
   longitude: number | null;
   standard_status: string | null;
   property_type: string | null;
+  property_subtype: string | null;
   bedrooms: number | null;
   bathrooms: number | null;
   living_area_sqft: number | null;
@@ -93,7 +95,7 @@ export function isUsableProperty(p: RESOProperty): boolean {
   const key = p.ListingKey ?? p.ListingId;
   if (!key) return false;
   if ((p.ClosePrice ?? 0) <= 0 || (p.LivingArea ?? 0) <= 0) return false;
-  return true;
+  return isSingleFamilyResidence(p);
 }
 
 /** Active/pending listings used as open comps — require list price, not close price. */
@@ -104,7 +106,7 @@ export function isUsableListingProperty(p: RESOProperty): boolean {
   if (listPrice <= 0 || (p.LivingArea ?? 0) <= 0) return false;
   const status = p.StandardStatus;
   if (status !== "Active" && status !== "Pending") return false;
-  return true;
+  return isSingleFamilyResidence(p);
 }
 
 export function toCleanProperty(p: RESOProperty): CleanProperty {
@@ -133,6 +135,7 @@ export function toCleanProperty(p: RESOProperty): CleanProperty {
     longitude: p.Longitude ?? null,
     standard_status: p.StandardStatus ?? null,
     property_type: p.PropertyType ?? null,
+    property_subtype: p.PropertySubType?.trim() || null,
     bedrooms: p.BedroomsTotal ?? null,
     bathrooms: totalBaths(p),
     living_area_sqft: p.LivingArea ?? null,

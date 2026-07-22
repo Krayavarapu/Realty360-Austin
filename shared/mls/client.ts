@@ -1,20 +1,6 @@
 import { resolveMlsBaseUrl, resolveMlsToken } from "./env";
 import type { ODataResponse } from "./types";
 
-/**
- * MLS Grid only allows a small set of fields in `$filter` on the replication
- * API. Anything outside this set must be filtered client-side after fetch.
- */
-export const SERVER_FILTERABLE_FIELDS = [
-  "OriginatingSystemName",
-  "StandardStatus",
-  "PropertyType",
-  "ListingId",
-  "MlgCanView",
-  "ModificationTimestamp",
-  "ListOfficeMlsId",
-] as const;
-
 function authHeaders(): HeadersInit {
   return {
     Authorization: `Bearer ${resolveMlsToken()}`,

@@ -166,16 +166,6 @@
     background-position: -1px -1px, -1px -1px, -1px -1px, -1px -1px;
   }
 
-  /* Amber glow effect for key numbers */
-  .amber-glow {
-    text-shadow: 0 0 20px oklch(0.82 0.18 75 / 0.4);
-  }
-
-  /* Teal glow for positive indicators */
-  .teal-glow {
-    text-shadow: 0 0 15px oklch(0.75 0.14 185 / 0.5);
-  }
-
   /* Card with blueprint border */
   .blueprint-card {
     background: oklch(0.15 0.05 250);
@@ -193,22 +183,6 @@
     height: 2px;
     background: linear-gradient(90deg, oklch(0.82 0.18 75), oklch(0.75 0.14 185));
     border-radius: 0.5rem 0.5rem 0 0;
-  }
-
-  /* Measurement tick marks */
-  .tick-border-bottom {
-    border-bottom: 1px solid oklch(0.27 0.07 250);
-    position: relative;
-  }
-
-  /* Animated counter */
-  @keyframes countUp {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .count-animate {
-    animation: countUp 0.4s ease-out forwards;
   }
 
   /* Slider custom styling */

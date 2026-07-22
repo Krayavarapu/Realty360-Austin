@@ -221,7 +221,7 @@ async function main(): Promise<void> {
 
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i++) {
-      doc.switchToPage(i);
+      doc.switchToPage(range.start + i);
       if (i === 0) continue; // cover has no footer
       drawPageFooter(doc, i);
     }

@@ -1,7 +1,4 @@
-import {
-  getFlipDealConfig,
-  TRAVIS_COUNTY_FLIP_DEAL_CONFIG,
-} from "./config";
+import { TRAVIS_COUNTY_FLIP_DEAL_CONFIG } from "./config";
 import type { FlipDealConfig, RehabScopeTier } from "./types";
 
 export interface RehabCostEstimate {
@@ -66,23 +63,6 @@ export function estimateSellClosingCost(
   return Math.round(arv * config.closing.sellSidePct);
 }
 
-/**
- * Monthly carry during hold — taxes prorated from `taxBasis` (purchase or assessed).
- */
-export function estimateMonthlyHoldCost(
-  taxBasis: number,
-  config: FlipDealConfig = TRAVIS_COUNTY_FLIP_DEAL_CONFIG,
-): number {
-  const { hold } = config;
-  const monthlyTax = (taxBasis * hold.propertyTaxRateAnnual) / 12;
-  return Math.round(
-    monthlyTax +
-      hold.insurancePerMonth +
-      hold.utilitiesPerMonth +
-      hold.hoaPerMonth,
-  );
-}
-
 export function estimateHoldCost(
   taxBasis: number,
   holdMonths?: number,
@@ -135,46 +115,5 @@ export function estimateFinancingCost(
     originationFee,
     interestDuringHold,
     totalFinancing: originationFee + interestDuringHold,
-  };
-}
-
-/** Total project cost before sale: purchase + rehab + buy closing + hold + financing. */
-export function estimateAllInProjectCost(opts: {
-  purchasePrice: number;
-  rehabTotal: number;
-  taxBasis?: number;
-  holdMonths?: number;
-  config?: FlipDealConfig;
-}): {
-  purchasePrice: number;
-  rehabTotal: number;
-  buyClosing: number;
-  hold: HoldCostEstimate;
-  financing: FinancingCostEstimate;
-  allInBeforeSale: number;
-} {
-  const config = opts.config ?? getFlipDealConfig();
-  const taxBasis = opts.taxBasis ?? opts.purchasePrice;
-  const projectCost = opts.purchasePrice + opts.rehabTotal;
-  const buyClosing = estimateBuyClosingCost(opts.purchasePrice, config);
-  const hold = estimateHoldCost(taxBasis, opts.holdMonths, config);
-  const financing = estimateFinancingCost(
-    projectCost,
-    opts.holdMonths,
-    config,
-  );
-  const allInBeforeSale =
-    projectCost +
-    buyClosing +
-    hold.totalHold +
-    financing.totalFinancing;
-
-  return {
-    purchasePrice: opts.purchasePrice,
-    rehabTotal: opts.rehabTotal,
-    buyClosing,
-    hold,
-    financing,
-    allInBeforeSale,
   };
 }

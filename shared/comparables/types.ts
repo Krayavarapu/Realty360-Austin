@@ -127,25 +127,3 @@ export interface UnifiedComparablesResponse {
   comparables: CompRecordDto[];
 }
 
-export interface MileComparableBucket {
-  mile: number;
-  label: string;
-  properties: RadiusComparableDto[];
-}
-
-export interface ComparablesByRadiusResponse {
-  match: "exact" | "prefix" | "partial";
-  radiusMiles: number;
-  filters: {
-    minBedrooms: number;
-    minBathrooms: number;
-    /** Present when the request included `maxAgeMonths`. */
-    maxAgeMonths?: number;
-    minCloseDate?: string;
-  };
-  subject: PropertyDetailDto;
-  count: number;
-  buckets: MileComparableBucket[];
-  /** Flat list sorted by match % then distance (debug / legacy consumers). */
-  properties: RadiusComparableDto[];
-}
