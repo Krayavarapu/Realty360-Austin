@@ -292,6 +292,7 @@ export default function ComparablesLanding() {
               checked={includeTcad}
               onCheckedChange={(checked) => setIncludeTcad(checked === true)}
               disabled={loading}
+              className="mt-0.5 size-4 border-amber-400/80 bg-secondary/60 data-[state=checked]:border-amber-400 data-[state=checked]:bg-amber-400 data-[state=checked]:text-navy-950 dark:bg-secondary/60"
             />
             <div className="grid gap-1 leading-none">
               <Label
